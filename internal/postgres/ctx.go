@@ -2,21 +2,21 @@ package postgres
 
 import "context"
 
-type dbtxKey struct{}
+type dbHandleKey struct{}
 
-func WithDBTX(ctx context.Context, db DBTX) context.Context {
+func WithDBHandle(ctx context.Context, db DBHandle) context.Context {
 	if db == nil {
 		return ctx
 	}
-	return context.WithValue(ctx, dbtxKey{}, db)
+	return context.WithValue(ctx, dbHandleKey{}, db)
 }
 
-func DBFromContext(ctx context.Context, fallback DBTX) DBTX {
+func DBFromContext(ctx context.Context, fallback DBHandle) DBHandle {
 	if ctx == nil {
 		return fallback
 	}
-	if value := ctx.Value(dbtxKey{}); value != nil {
-		if db, ok := value.(DBTX); ok {
+	if value := ctx.Value(dbHandleKey{}); value != nil {
+		if db, ok := value.(DBHandle); ok {
 			return db
 		}
 	}

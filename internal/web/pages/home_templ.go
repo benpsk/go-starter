@@ -10,7 +10,7 @@ import templruntime "github.com/a-h/templ/runtime"
 
 import "github.com/benpsk/go-starter/internal/web/components"
 
-func HomePage(appName string, appURL string) templ.Component {
+func HomePage(appName string, appURL string, googleTagID string, auth components.HeaderAuthData) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -31,7 +31,7 @@ func HomePage(appName string, appURL string) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = components.Layout(appName, appURL, "/", components.PageMeta{
+		templ_7745c5c3_Err = components.Layout(appName, appURL, googleTagID, auth, components.PageMeta{
 			Title:       appName,
 			Description: "Minimal Go starter with chi, pgx, templ, Tailwind, DaisyUI, htmx, and Chart.js.",
 			Keywords:    "go starter,chi,pgx,templ,tailwind,daisyui,htmx,chartjs",

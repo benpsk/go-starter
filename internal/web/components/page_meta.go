@@ -52,10 +52,6 @@ func normalizePath(path string) string {
 	return p
 }
 
-func navItemClass(currentPath, targetPath string) string {
-	base := "btn btn-ghost btn-sm"
-	if normalizePath(currentPath) == normalizePath(targetPath) {
-		return base + " btn-active"
-	}
-	return base
+func hasGoogleTagID(v string) bool {
+	return strings.TrimSpace(v) != ""
 }

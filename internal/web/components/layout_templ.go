@@ -8,7 +8,7 @@ package components
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-func Layout(appName string, appURL string, currentPath string, meta PageMeta, body templ.Component) templ.Component {
+func Layout(appName string, appURL string, googleTagID string, auth HeaderAuthData, meta PageMeta, body templ.Component) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -172,11 +172,47 @@ func Layout(appName string, appURL string, currentPath string, meta PageMeta, bo
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\"><link rel=\"stylesheet\" href=\"/static/app.css\"></head><body class=\"min-h-screen bg-base-200 text-base-content\" hx-boost=\"true\" hx-target=\"#page-content\" hx-indicator=\"#loading-bar\" hx-swap=\"outerHTML show:window:top\"><div id=\"loading-bar\" class=\"bg-primary\"></div><div class=\"pointer-events-none fixed inset-0 -z-10\"><div class=\"absolute left-1/2 top-0 h-72 w-72 -translate-x-1/2 rounded-full bg-primary/20 blur-3xl\"></div><div class=\"absolute bottom-0 right-0 h-80 w-80 rounded-full bg-secondary/15 blur-3xl\"></div></div><div class=\"mx-auto flex min-h-screen w-full max-w-6xl flex-col px-3 sm:px-6\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\"><link rel=\"stylesheet\" href=\"/static/app.css\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = Header(appName, currentPath).Render(ctx, templ_7745c5c3_Buffer)
+		if hasGoogleTagID(googleTagID) {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<!-- Google tag (gtag.js) --> <script async src=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var13 string
+			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs("https://www.googletagmanager.com/gtag/js?id=" + googleTagID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/components/layout.templ`, Line: 25, Col: 84}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\"></script> <script>\n\t\t\t\t\twindow.dataLayer = window.dataLayer || [];\n\t\t\t\t\tfunction gtag(){dataLayer.push(arguments);}\n\t\t\t\t\tgtag('js', new Date());\n\t\t\t\t</script>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</head><body data-google-tag-id=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var14 string
+		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(googleTagID)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/components/layout.templ`, Line: 33, Col: 40}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\" class=\"min-h-screen bg-base-200 text-base-content\" hx-boost=\"true\" hx-target=\"#page-content\" hx-indicator=\"#loading-bar\" hx-swap=\"outerHTML show:window:top\"><div id=\"loading-bar\" class=\"bg-primary\"></div><div class=\"pointer-events-none fixed inset-0 -z-10\"><div class=\"absolute left-1/2 top-0 h-72 w-72 -translate-x-1/2 rounded-full bg-primary/20 blur-3xl\"></div><div class=\"absolute bottom-0 right-0 h-80 w-80 rounded-full bg-secondary/15 blur-3xl\"></div></div><div class=\"mx-auto flex min-h-screen w-full max-w-6xl flex-col px-3 sm:px-6\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = Header(appName, auth).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -188,7 +224,7 @@ func Layout(appName string, appURL string, currentPath string, meta PageMeta, bo
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</div><script defer src=\"/static/vendor/htmx.min.js\"></script><script defer src=\"/static/vendor/chart.umd.min.js\"></script><script defer src=\"/static/app.min.js\"></script></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</div><script defer src=\"/static/vendor/htmx.min.js\"></script><script defer src=\"/static/vendor/chart.umd.min.js\"></script><script defer src=\"/static/app.min.js\"></script></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

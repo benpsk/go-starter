@@ -1,4 +1,4 @@
-package postgres
+package server
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/benpsk/go-starter/internal/config"
+	"github.com/benpsk/go-starter/internal/postgres"
 	"github.com/benpsk/go-starter/internal/testenv"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -26,27 +27,39 @@ func TestMain(m *testing.M) {
 	}
 
 	ctx := context.Background()
-	pool, err := Connect(ctx, cfg.Database)
+	pool, err := postgres.Connect(ctx, cfg.Database)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	unlock, err := testenv.LockIntegrationDB(ctx, pool, 7202602)
+	unlock, err := testenv.LockIntegrationDB(ctx, pool, 7202603)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	if err := EnsureTable(ctx, pool); err != nil {
+	if err := postgres.EnsureTable(ctx, pool); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if err := EnsureSeedTable(ctx, pool); err != nil {
+	if err := postgres.EnsureSeedTable(ctx, pool); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if _, err := Apply(ctx, pool, "../../db/migrations"); err != nil {
+	if err := postgres.ResetSchema(ctx, pool); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := postgres.EnsureTable(ctx, pool); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := postgres.EnsureSeedTable(ctx, pool); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if _, err := postgres.Apply(ctx, pool, "../../db/migrations"); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -60,13 +73,12 @@ func TestMain(m *testing.M) {
 
 func withTx(t *testing.T) (context.Context, func()) {
 	t.Helper()
-
 	ctx := context.Background()
 	tx, err := integrationPool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	return WithDBHandle(ctx, tx), func() {
+	return postgres.WithDBHandle(ctx, tx), func() {
 		_ = tx.Rollback(ctx)
 	}
 }

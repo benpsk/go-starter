@@ -2,8 +2,8 @@ package pages
 
 import "github.com/benpsk/go-starter/internal/web/components"
 
-templ AboutPage(appName string, appURL string) {
-	@components.Layout(appName, appURL, "/about", components.PageMeta{
+templ AboutPage(appName string, appURL string, googleTagID string, auth components.HeaderAuthData) {
+	@components.Layout(appName, appURL, googleTagID, auth, components.PageMeta{
 		Title:       "About",
 		Description: "About the Go Starter template extracted from a reusable production structure.",
 		Keywords:    "go starter about",

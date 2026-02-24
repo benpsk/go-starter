@@ -1,6 +1,6 @@
 package components
 
-templ Header(appName string, currentPath string) {
+templ Header(appName string, auth HeaderAuthData) {
 	<header class="pt-3 sm:pt-5">
 		<div class="navbar rounded-2xl border border-base-300/60 bg-base-100/85 px-3 shadow-lg backdrop-blur sm:px-5">
 			<div class="navbar-start">
@@ -8,12 +8,25 @@ templ Header(appName string, currentPath string) {
 			</div>
 			<div class="navbar-center hidden md:flex">
 				<ul class="menu menu-horizontal gap-1 px-1">
-					<li><a href="/" data-nav-link class={ navItemClass(currentPath, "/") }>Home</a></li>
-					<li><a href="/about" data-nav-link class={ navItemClass(currentPath, "/about") }>About</a></li>
+					<li><a href="/" data-nav-link class="btn btn-ghost btn-sm">Home</a></li>
+					<li><a href="/about" data-nav-link class="btn btn-ghost btn-sm">About</a></li>
 					<li><a href="/healthz" hx-boost="false" class="btn btn-ghost btn-sm">Health JSON</a></li>
 				</ul>
 			</div>
 			<div class="navbar-end gap-2">
+				if auth.IsAuthenticated {
+					<a href="/account" data-nav-link class="btn btn-ghost btn-sm">
+						if auth.AvatarURL != "" {
+							<img src={ auth.AvatarURL } alt="" class="h-5 w-5 rounded-full object-cover"/>
+						}
+						<span class="max-w-32 truncate">{ auth.DisplayName }</span>
+					</a>
+					<form method="post" action="/auth/logout">
+						<button type="submit" class="btn btn-ghost btn-sm">Logout</button>
+					</form>
+				} else {
+					<a href="/auth/login" data-nav-link class="btn btn-primary btn-sm">Login</a>
+				}
 				<button type="button" class="btn btn-outline btn-sm btn-circle" data-theme-toggle aria-label="Toggle theme">
 					<span data-theme-icon="system">S</span>
 					<span data-theme-icon="light" class="hidden">L</span>

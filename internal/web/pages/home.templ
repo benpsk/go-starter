@@ -2,8 +2,8 @@ package pages
 
 import "github.com/benpsk/go-starter/internal/web/components"
 
-templ HomePage(appName string, appURL string) {
-	@components.Layout(appName, appURL, "/", components.PageMeta{
+templ HomePage(appName string, appURL string, googleTagID string, auth components.HeaderAuthData) {
+	@components.Layout(appName, appURL, googleTagID, auth, components.PageMeta{
 		Title:       appName,
 		Description: "Minimal Go starter with chi, pgx, templ, Tailwind, DaisyUI, htmx, and Chart.js.",
 		Keywords:    "go starter,chi,pgx,templ,tailwind,daisyui,htmx,chartjs",

@@ -1,6 +1,6 @@
 package components
 
-templ Layout(appName string, appURL string, currentPath string, meta PageMeta, body templ.Component) {
+templ Layout(appName string, appURL string, googleTagID string, auth HeaderAuthData, meta PageMeta, body templ.Component) {
 	<!DOCTYPE html>
 	<html lang="en" data-light-theme="silk" data-dark-theme="coffee">
 		<head>
@@ -20,15 +20,24 @@ templ Layout(appName string, appURL string, currentPath string, meta PageMeta, b
 			<meta name="twitter:title" content={ meta.fullTitle(appName) }/>
 			<meta name="twitter:description" content={ meta.Description }/>
 			<link rel="stylesheet" href="/static/app.css"/>
+			if hasGoogleTagID(googleTagID) {
+				<!-- Google tag (gtag.js) -->
+				<script async src={ "https://www.googletagmanager.com/gtag/js?id=" + googleTagID }></script>
+				<script>
+					window.dataLayer = window.dataLayer || [];
+					function gtag(){dataLayer.push(arguments);}
+					gtag('js', new Date());
+				</script>
+			}
 		</head>
-		<body class="min-h-screen bg-base-200 text-base-content" hx-boost="true" hx-target="#page-content" hx-indicator="#loading-bar" hx-swap="outerHTML show:window:top">
+		<body data-google-tag-id={ googleTagID } class="min-h-screen bg-base-200 text-base-content" hx-boost="true" hx-target="#page-content" hx-indicator="#loading-bar" hx-swap="outerHTML show:window:top">
 			<div id="loading-bar" class="bg-primary"></div>
 			<div class="pointer-events-none fixed inset-0 -z-10">
 				<div class="absolute left-1/2 top-0 h-72 w-72 -translate-x-1/2 rounded-full bg-primary/20 blur-3xl"></div>
 				<div class="absolute bottom-0 right-0 h-80 w-80 rounded-full bg-secondary/15 blur-3xl"></div>
 			</div>
 			<div class="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-3 sm:px-6">
-				@Header(appName, currentPath)
+					@Header(appName, auth)
 				@MainContent(body)
 				@Footer(appName)
 			</div>
