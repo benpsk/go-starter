@@ -1,0 +1,40 @@
+package components
+
+templ Layout(appName string, appURL string, currentPath string, meta PageMeta, body templ.Component) {
+	<!DOCTYPE html>
+	<html lang="en" data-light-theme="silk" data-dark-theme="coffee">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ meta.fullTitle(appName) }</title>
+			<meta name="description" content={ meta.Description }/>
+			<meta name="keywords" content={ meta.Keywords }/>
+			<meta name="robots" content="index,follow"/>
+			<link rel="canonical" href={ meta.canonicalURL(appURL) }/>
+			<meta property="og:site_name" content={ appName }/>
+			<meta property="og:title" content={ meta.fullTitle(appName) }/>
+			<meta property="og:description" content={ meta.Description }/>
+			<meta property="og:type" content={ meta.resolvedType() }/>
+			<meta property="og:url" content={ meta.canonicalURL(appURL) }/>
+			<meta name="twitter:card" content="summary_large_image"/>
+			<meta name="twitter:title" content={ meta.fullTitle(appName) }/>
+			<meta name="twitter:description" content={ meta.Description }/>
+			<link rel="stylesheet" href="/static/app.css"/>
+		</head>
+		<body class="min-h-screen bg-base-200 text-base-content" hx-boost="true" hx-target="#page-content" hx-indicator="#loading-bar" hx-swap="outerHTML show:window:top">
+			<div id="loading-bar" class="bg-primary"></div>
+			<div class="pointer-events-none fixed inset-0 -z-10">
+				<div class="absolute left-1/2 top-0 h-72 w-72 -translate-x-1/2 rounded-full bg-primary/20 blur-3xl"></div>
+				<div class="absolute bottom-0 right-0 h-80 w-80 rounded-full bg-secondary/15 blur-3xl"></div>
+			</div>
+			<div class="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-3 sm:px-6">
+				@Header(appName, currentPath)
+				@MainContent(body)
+				@Footer(appName)
+			</div>
+			<script defer src="/static/vendor/htmx.min.js"></script>
+			<script defer src="/static/vendor/chart.umd.min.js"></script>
+			<script defer src="/static/app.min.js"></script>
+		</body>
+	</html>
+}

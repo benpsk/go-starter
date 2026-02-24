@@ -1,0 +1,14 @@
+package components
+
+import "time"
+
+templ Footer(appName string) {
+	<footer class="pb-4 pt-8">
+		<div class="rounded-2xl border border-base-300/60 bg-base-100/85 px-5 py-6 shadow-md">
+			<div class="flex flex-col gap-3 text-sm text-base-content/70 sm:flex-row sm:items-center sm:justify-between">
+				<p><span class="font-semibold text-base-content">{ appName }</span> starter template with chi + pgx + templ + htmx.</p>
+				<p>&copy; { time.Now().Year() }</p>
+			</div>
+		</div>
+	</footer>
+}

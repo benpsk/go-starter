@@ -1,0 +1,30 @@
+package pages
+
+import "github.com/benpsk/go-starter/internal/web/components"
+
+templ AboutPage(appName string, appURL string) {
+	@components.Layout(appName, appURL, "/about", components.PageMeta{
+		Title:       "About",
+		Description: "About the Go Starter template extracted from a reusable production structure.",
+		Keywords:    "go starter about",
+		Path:        "/about",
+		Type:        "article",
+	}, AboutContent())
+}
+
+templ AboutContent() {
+	<section class="pb-6 pt-8 sm:pt-12">
+		<div class="rounded-3xl border border-base-300/60 bg-base-100/90 p-7 shadow-xl">
+			<p class="badge badge-outline">About</p>
+			<h1 class="mt-4 text-4xl font-black tracking-tight sm:text-5xl">What this starter gives you</h1>
+			<ul class="mt-5 list-disc space-y-2 pl-5 text-base-content/75">
+				<li>Minimal chi router with middleware and static serving</li>
+				<li>pgx connection pool and health endpoint</li>
+				<li>Raw SQL migrations and seeders with embedded fallback</li>
+				<li>`cmd/dump` wrapper around `pg_dump`</li>
+				<li>templ pages/components with htmx boosted navigation</li>
+				<li>Tailwind + DaisyUI + Chart.js asset pipeline</li>
+			</ul>
+		</div>
+	</section>
+}

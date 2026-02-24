@@ -1,0 +1,13 @@
+.env
+.env.test
+.gocache
+node_modules/
+tmp/
+!cmd/app/
+!cmd/app/main.go
+!cmd/cli/
+!cmd/cli/main.go
+static/app.css
+static/app.min.js
+static/vendor/*.js
+!static/vendor/.gitignore
