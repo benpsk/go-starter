@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/benpsk/go-starter/internal/config"
 	"github.com/benpsk/go-starter/internal/postgres"
+	"github.com/benpsk/go-starter/internal/r2"
 	"github.com/benpsk/go-starter/internal/server"
+	"github.com/benpsk/go-starter/internal/storage"
 )
 
 func main() {
@@ -30,12 +33,32 @@ func main() {
 	}
 	defer db.Close()
 
-	r := server.NewRouter(cfg, db)
+	store, err := newStorage(ctx, cfg)
+	if err != nil {
+		log.Fatalf("storage: %v", err)
+	}
+
+	r := server.NewRouter(cfg, db, store)
 	srv := server.New(cfg, r)
 
 	log.Printf("Listening on %s", listenURL(cfg.HTTPAddr))
 	if err := srv.Start(ctx); err != nil {
 		log.Fatalf("server: %v", err)
+	}
+}
+
+func newStorage(ctx context.Context, cfg config.Config) (storage.Store, error) {
+	switch cfg.Storage.Driver {
+	case "local":
+		return storage.NewLocal(cfg.Storage.LocalDir, cfg.AppURL, cfg.Storage.LocalPublicPath)
+	case "r2":
+		client, err := r2.New(ctx, cfg.R2.Endpoint, cfg.R2.Region, cfg.R2.AccessKeyID, cfg.R2.SecretAccessKey, cfg.R2.Bucket, cfg.R2.PublicBaseURL)
+		if err != nil {
+			return nil, err
+		}
+		return storage.NewR2(client), nil
+	default:
+		return nil, fmt.Errorf("unsupported storage driver %q", cfg.Storage.Driver)
 	}
 }
 

@@ -229,7 +229,7 @@ func testAPIHandler(t *testing.T) handler {
 			},
 		},
 	}
-	return newHandler(integrationPool, cfg)
+	return newHandler(integrationPool, cfg, nil)
 }
 
 func jsonRequest(t *testing.T, method, path string, body any) *http.Request {

@@ -11,6 +11,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/benpsk/go-starter/internal/config"
 	"github.com/benpsk/go-starter/internal/postgres"
+	"github.com/benpsk/go-starter/internal/storage"
 	"github.com/benpsk/go-starter/internal/user"
 	"github.com/benpsk/go-starter/internal/web/components"
 	"github.com/benpsk/go-starter/internal/web/pages"
@@ -21,6 +22,7 @@ import (
 type handler struct {
 	db                       *pgxpool.Pool
 	users                    *postgres.UserAuthStore
+	store                    storage.Store
 	appName                  string
 	appEnv                   string
 	appURL                   string
@@ -38,10 +40,11 @@ type handler struct {
 	githubOAuth              oauthProviderConfig
 }
 
-func newHandler(db *pgxpool.Pool, cfg config.Config) handler {
+func newHandler(db *pgxpool.Pool, cfg config.Config, store storage.Store) handler {
 	return handler{
 		db:                       db,
 		users:                    postgres.NewUserAuthStore(db),
+		store:                    store,
 		appName:                  cfg.AppName,
 		appEnv:                   cfg.AppEnv,
 		appURL:                   cfg.AppURL,

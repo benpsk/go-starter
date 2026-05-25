@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/benpsk/go-starter/internal/config"
+	"github.com/benpsk/go-starter/internal/storage"
 	webstatic "github.com/benpsk/go-starter/static"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -15,7 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func NewRouter(cfg config.Config, db *pgxpool.Pool) *chi.Mux {
+func NewRouter(cfg config.Config, db *pgxpool.Pool, store storage.Store) *chi.Mux {
 	r := chi.NewRouter()
 
 	r.Use(cors.Handler(cors.Options{
@@ -38,7 +39,7 @@ func NewRouter(cfg config.Config, db *pgxpool.Pool) *chi.Mux {
 		staticFS = http.Dir("static")
 	}
 
-	h := newHandler(db, cfg)
+	h := newHandler(db, cfg, store)
 	authRateLimiter := newAuthRateLimiter(defaultAuthRateLimitRequests, defaultAuthRateLimitWindow)
 	r.Use(h.loadSession)
 
@@ -46,6 +47,10 @@ func NewRouter(cfg config.Config, db *pgxpool.Pool) *chi.Mux {
 	r.MethodNotAllowed(h.methodNotAllowedPage)
 
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(staticFS)))
+	if cfg.Storage.Driver == "local" {
+		mediaPrefix := strings.TrimRight(cfg.Storage.LocalPublicPath, "/") + "/"
+		r.Handle(mediaPrefix+"*", http.StripPrefix(mediaPrefix, http.FileServer(http.Dir(cfg.Storage.LocalDir))))
+	}
 	r.Get("/", h.homePage)
 	r.Get("/about", h.aboutPage)
 	r.With(h.requireGuest).Get("/auth/login", h.loginPage)

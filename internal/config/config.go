@@ -24,6 +24,10 @@ const (
 	defaultDBMaxConns       = int32(4)
 	defaultDBConnLifetime   = 30 * time.Minute
 	defaultDBConnIdleTime   = 5 * time.Minute
+	defaultStorageDriver    = "local"
+	defaultLocalStorageDir  = "media"
+	defaultLocalPublicPath  = "/media"
+	defaultR2Region         = "auto"
 )
 
 type Config struct {
@@ -35,6 +39,23 @@ type Config struct {
 	HTTPAddr        string
 	ShutdownTimeout time.Duration
 	Database        DatabaseConfig
+	Storage         StorageConfig
+	R2              R2Config
+}
+
+type StorageConfig struct {
+	Driver          string
+	LocalDir        string
+	LocalPublicPath string
+}
+
+type R2Config struct {
+	Endpoint        string
+	Region          string
+	AccessKeyID     string
+	SecretAccessKey string
+	Bucket          string
+	PublicBaseURL   string
 }
 
 type AuthConfig struct {
@@ -89,6 +110,14 @@ func Load() (Config, error) {
 			MaxConns:        defaultDBMaxConns,
 			MaxConnLifetime: defaultDBConnLifetime,
 			MaxConnIdleTime: defaultDBConnIdleTime,
+		},
+		Storage: StorageConfig{
+			Driver:          defaultStorageDriver,
+			LocalDir:        defaultLocalStorageDir,
+			LocalPublicPath: defaultLocalPublicPath,
+		},
+		R2: R2Config{
+			Region: defaultR2Region,
 		},
 	}
 
@@ -204,6 +233,59 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("parse DATABASE_MAX_CONN_IDLE_TIME: %w", err)
 		}
 		cfg.Database.MaxConnIdleTime = d
+	}
+
+	if v := strings.TrimSpace(os.Getenv("STORAGE_DRIVER")); v != "" {
+		cfg.Storage.Driver = strings.ToLower(v)
+	}
+	if v := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_DIR")); v != "" {
+		cfg.Storage.LocalDir = v
+	}
+	if v := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_PUBLIC_PATH")); v != "" {
+		cfg.Storage.LocalPublicPath = v
+	}
+	if !strings.HasPrefix(cfg.Storage.LocalPublicPath, "/") {
+		cfg.Storage.LocalPublicPath = "/" + cfg.Storage.LocalPublicPath
+	}
+
+	if v := strings.TrimSpace(os.Getenv("R2_ENDPOINT")); v != "" {
+		cfg.R2.Endpoint = v
+	}
+	if v := strings.TrimSpace(os.Getenv("R2_REGION")); v != "" {
+		cfg.R2.Region = v
+	}
+	cfg.R2.AccessKeyID = strings.TrimSpace(os.Getenv("R2_ACCESS_KEY_ID"))
+	cfg.R2.SecretAccessKey = strings.TrimSpace(os.Getenv("R2_SECRET_ACCESS_KEY"))
+	cfg.R2.Bucket = strings.TrimSpace(os.Getenv("R2_BUCKET"))
+	cfg.R2.PublicBaseURL = strings.TrimSpace(os.Getenv("R2_PUBLIC_BASE_URL"))
+
+	switch cfg.Storage.Driver {
+	case "local":
+		if strings.TrimSpace(cfg.Storage.LocalDir) == "" {
+			return Config{}, errors.New("LOCAL_STORAGE_DIR must not be empty when STORAGE_DRIVER=local")
+		}
+	case "r2":
+		missing := []string{}
+		if cfg.R2.Endpoint == "" {
+			missing = append(missing, "R2_ENDPOINT")
+		}
+		if cfg.R2.AccessKeyID == "" {
+			missing = append(missing, "R2_ACCESS_KEY_ID")
+		}
+		if cfg.R2.SecretAccessKey == "" {
+			missing = append(missing, "R2_SECRET_ACCESS_KEY")
+		}
+		if cfg.R2.Bucket == "" {
+			missing = append(missing, "R2_BUCKET")
+		}
+		if cfg.R2.PublicBaseURL == "" {
+			missing = append(missing, "R2_PUBLIC_BASE_URL")
+		}
+		if len(missing) > 0 {
+			return Config{}, fmt.Errorf("STORAGE_DRIVER=r2 requires: %s", strings.Join(missing, ", "))
+		}
+	default:
+		return Config{}, fmt.Errorf("STORAGE_DRIVER must be either local or r2, got %q", cfg.Storage.Driver)
 	}
 
 	return cfg, nil

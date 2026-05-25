@@ -186,7 +186,7 @@ func testHandler(t *testing.T) handler {
 			SessionTTL:        30 * 24 * time.Hour,
 		},
 	}
-	return newHandler(integrationPool, cfg)
+	return newHandler(integrationPool, cfg, nil)
 }
 
 func insertUserAndSession(t *testing.T, ctx context.Context, store *postgres.UserAuthStore) (user.User, string, int64) {
