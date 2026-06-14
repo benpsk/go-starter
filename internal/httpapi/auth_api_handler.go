@@ -1,4 +1,4 @@
-package server
+package httpapi
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/benpsk/go-starter/internal/auth"
 	"github.com/benpsk/go-starter/internal/user"
 	"github.com/go-chi/chi/v5"
 )
@@ -16,44 +17,36 @@ type apiAuthContextKey string
 
 const apiAuthClaimsKey apiAuthContextKey = "api_auth_claims"
 
-type apiLoginRequest struct {
+type loginRequest struct {
 	Code         string `json:"code"`
 	CodeVerifier string `json:"code_verifier"`
 	RedirectURI  string `json:"redirect_uri"`
 }
 
-type apiRefreshRequest struct {
+type refreshRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
-type apiTokenResponse struct {
-	TokenType             string    `json:"token_type"`
-	AccessToken           string    `json:"access_token"`
-	AccessTokenExpiresAt  time.Time `json:"access_token_expires_at"`
-	RefreshToken          string    `json:"refresh_token,omitempty"`
-	RefreshTokenExpiresAt time.Time `json:"refresh_token_expires_at,omitempty"`
-}
-
-type apiAuthUserResponse struct {
+type userResponse struct {
 	ID          int64  `json:"id"`
 	Email       string `json:"email,omitempty"`
 	DisplayName string `json:"display_name"`
 	AvatarURL   string `json:"avatar_url,omitempty"`
 }
 
-func (h handler) apiLogin(w http.ResponseWriter, r *http.Request) {
-	if strings.TrimSpace(h.apiAccessTokenSecret) == "" {
+func (h Handler) login(w http.ResponseWriter, r *http.Request) {
+	if !h.auth.APIAuthConfigured() {
 		writeErrorJSON(w, http.StatusServiceUnavailable, "api auth is not configured")
 		return
 	}
 	provider := strings.TrimSpace(strings.ToLower(chi.URLParam(r, "provider")))
-	cfg, ok := h.oauthProviderConfig(provider)
-	if !ok || !providerEnabled(cfg) {
+	cfg, ok := h.auth.ProviderConfig(provider)
+	if !ok || !auth.ProviderEnabled(cfg) {
 		writeErrorJSON(w, http.StatusBadRequest, "provider is not configured")
 		return
 	}
 
-	var req apiLoginRequest
+	var req loginRequest
 	if err := decodeJSONWithLimit(w, r, &req, defaultRequestBodyLimitBytes); err != nil {
 		if isRequestBodyTooLarge(err) {
 			writeErrorJSON(w, http.StatusRequestEntityTooLarge, "request body too large")
@@ -67,12 +60,12 @@ func (h handler) apiLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	profile, err := h.verifier.ExchangeAndVerify(r.Context(), provider, req.Code, req.CodeVerifier, strings.TrimSpace(req.RedirectURI), cfg)
+	profile, err := h.auth.ExchangeAndVerify(r.Context(), provider, req.Code, req.CodeVerifier, strings.TrimSpace(req.RedirectURI), cfg)
 	if err != nil {
 		writeErrorJSON(w, http.StatusUnauthorized, "oauth login failed")
 		return
 	}
-	currentUser, err := h.findOrCreateSocialUser(r.Context(), profile)
+	currentUser, err := h.auth.FindOrCreateSocialUser(r.Context(), profile)
 	if err != nil {
 		if errors.Is(err, user.ErrEmailConflict) {
 			writeErrorJSON(w, http.StatusConflict, "account email is already used by another provider")
@@ -82,19 +75,19 @@ func (h handler) apiLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := h.issueAPITokenPair(r.Context(), currentUser.ID, time.Now())
+	resp, err := h.auth.IssueAPITokenPair(r.Context(), currentUser.ID, time.Now())
 	if err != nil {
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to issue tokens")
 		return
 	}
-	h.setAPIRefreshCookie(w, r, resp.RefreshToken, resp.RefreshTokenExpiresAt)
+	h.auth.SetAPIRefreshCookie(w, r, resp.RefreshToken, resp.RefreshTokenExpiresAt)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token_type":               resp.TokenType,
 		"access_token":             resp.AccessToken,
 		"access_token_expires_at":  resp.AccessTokenExpiresAt,
 		"refresh_token":            resp.RefreshToken,
 		"refresh_token_expires_at": resp.RefreshTokenExpiresAt,
-		"user": apiAuthUserResponse{
+		"user": userResponse{
 			ID:          currentUser.ID,
 			Email:       currentUser.Email,
 			DisplayName: currentUser.DisplayName,
@@ -103,14 +96,14 @@ func (h handler) apiLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h handler) apiRefresh(w http.ResponseWriter, r *http.Request) {
-	if strings.TrimSpace(h.apiAccessTokenSecret) == "" {
+func (h Handler) refresh(w http.ResponseWriter, r *http.Request) {
+	if !h.auth.APIAuthConfigured() {
 		writeErrorJSON(w, http.StatusServiceUnavailable, "api auth is not configured")
 		return
 	}
-	refreshToken := h.apiRefreshTokenFromRequest(r)
+	refreshToken := h.auth.APIRefreshTokenFromRequest(r)
 	if refreshToken == "" {
-		var req apiRefreshRequest
+		var req refreshRequest
 		if err := decodeJSONWithLimit(w, r, &req, defaultRequestBodyLimitBytes); err == nil {
 			refreshToken = strings.TrimSpace(req.RefreshToken)
 		} else if isRequestBodyTooLarge(err) {
@@ -125,19 +118,19 @@ func (h handler) apiRefresh(w http.ResponseWriter, r *http.Request) {
 		writeErrorJSON(w, http.StatusBadRequest, "refresh_token is required")
 		return
 	}
-	resp, err := h.rotateAPIRefreshToken(r.Context(), refreshToken, time.Now())
+	resp, err := h.auth.RotateAPIRefreshToken(r.Context(), refreshToken, time.Now())
 	if err != nil {
 		writeErrorJSON(w, http.StatusUnauthorized, "invalid refresh token")
 		return
 	}
-	h.setAPIRefreshCookie(w, r, resp.RefreshToken, resp.RefreshTokenExpiresAt)
+	h.auth.SetAPIRefreshCookie(w, r, resp.RefreshToken, resp.RefreshTokenExpiresAt)
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h handler) apiLogout(w http.ResponseWriter, r *http.Request) {
-	refreshToken := h.apiRefreshTokenFromRequest(r)
+func (h Handler) logout(w http.ResponseWriter, r *http.Request) {
+	refreshToken := h.auth.APIRefreshTokenFromRequest(r)
 	if refreshToken == "" {
-		var req apiRefreshRequest
+		var req refreshRequest
 		if err := decodeJSONWithLimit(w, r, &req, defaultRequestBodyLimitBytes); err == nil {
 			refreshToken = strings.TrimSpace(req.RefreshToken)
 		} else if isRequestBodyTooLarge(err) {
@@ -149,24 +142,24 @@ func (h handler) apiLogout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if refreshToken != "" {
-		_ = h.users.RevokeAPIRefreshTokenByHash(r.Context(), hashToken(refreshToken), time.Now())
+		_ = h.auth.Users().RevokeAPIRefreshTokenByHash(r.Context(), auth.HashToken(refreshToken), time.Now())
 	}
-	h.clearAPIRefreshCookie(w, r)
+	h.auth.ClearAPIRefreshCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h handler) apiMe(w http.ResponseWriter, r *http.Request) {
+func (h Handler) me(w http.ResponseWriter, r *http.Request) {
 	claims := apiAuthFromContext(r)
 	if claims == nil {
 		writeErrorJSON(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	currentUser, err := h.users.FindByID(r.Context(), claims.UserID)
+	currentUser, err := h.auth.Users().FindByID(r.Context(), claims.UserID)
 	if err != nil {
 		writeErrorJSON(w, http.StatusUnauthorized, "user not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, apiAuthUserResponse{
+	writeJSON(w, http.StatusOK, userResponse{
 		ID:          currentUser.ID,
 		Email:       currentUser.Email,
 		DisplayName: currentUser.DisplayName,
@@ -174,10 +167,10 @@ func (h handler) apiMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h handler) requireAPIAuth(next http.Handler) http.Handler {
+func (h Handler) requireAPIAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := bearerTokenFromRequest(r)
-		claims, err := h.parseAPIAccessToken(token)
+		token := auth.BearerTokenFromRequest(r)
+		claims, err := h.auth.ParseAPIAccessToken(token)
 		if err != nil {
 			writeErrorJSON(w, http.StatusUnauthorized, "unauthorized")
 			return
@@ -187,16 +180,12 @@ func (h handler) requireAPIAuth(next http.Handler) http.Handler {
 	})
 }
 
-func apiAuthFromContext(r *http.Request) *parsedAPIAccessToken {
+func apiAuthFromContext(r *http.Request) *auth.ParsedAPIAccessToken {
 	if r == nil {
 		return nil
 	}
-	if claims, ok := r.Context().Value(apiAuthClaimsKey).(*parsedAPIAccessToken); ok {
+	if claims, ok := r.Context().Value(apiAuthClaimsKey).(*auth.ParsedAPIAccessToken); ok {
 		return claims
 	}
 	return nil
-}
-
-func writeErrorJSON(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]any{"error": strings.TrimSpace(message)})
 }

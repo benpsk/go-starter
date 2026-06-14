@@ -1,4 +1,4 @@
-package server
+package auth
 
 import (
 	"context"
@@ -22,19 +22,24 @@ var (
 	errOAuthInvalidInput = errors.New("oauth invalid input")
 )
 
+type SocialVerifier interface {
+	ExchangeAndVerify(ctx context.Context, provider string, code string, codeVerifier string, redirectURI string, cfg ProviderConfig) (user.SocialProfile, error)
+}
+
 type socialVerifier struct {
 	httpClient *http.Client
 }
 
-type socialAuthVerifier interface {
-	ExchangeAndVerify(ctx context.Context, provider string, code string, codeVerifier string, redirectURI string, cfg oauthProviderConfig) (user.SocialProfile, error)
+type ProviderConfig struct {
+	ClientID     string
+	ClientSecret string
 }
 
-func newSocialVerifier() *socialVerifier {
+func NewSocialVerifier() *socialVerifier {
 	return &socialVerifier{httpClient: &http.Client{Timeout: 10 * time.Second}}
 }
 
-func (v *socialVerifier) ExchangeAndVerify(ctx context.Context, provider string, code string, codeVerifier string, redirectURI string, cfg oauthProviderConfig) (user.SocialProfile, error) {
+func (v *socialVerifier) ExchangeAndVerify(ctx context.Context, provider string, code string, codeVerifier string, redirectURI string, cfg ProviderConfig) (user.SocialProfile, error) {
 	provider = strings.TrimSpace(strings.ToLower(provider))
 	switch provider {
 	case "google":
@@ -46,12 +51,7 @@ func (v *socialVerifier) ExchangeAndVerify(ctx context.Context, provider string,
 	}
 }
 
-type oauthProviderConfig struct {
-	ClientID     string
-	ClientSecret string
-}
-
-func (v *socialVerifier) google(ctx context.Context, code, codeVerifier, redirectURI string, cfg oauthProviderConfig) (user.SocialProfile, error) {
+func (v *socialVerifier) google(ctx context.Context, code, codeVerifier, redirectURI string, cfg ProviderConfig) (user.SocialProfile, error) {
 	if strings.TrimSpace(code) == "" || strings.TrimSpace(cfg.ClientID) == "" || strings.TrimSpace(cfg.ClientSecret) == "" {
 		return user.SocialProfile{}, errOAuthInvalidInput
 	}
@@ -123,7 +123,7 @@ func (v *socialVerifier) google(ctx context.Context, code, codeVerifier, redirec
 	}, nil
 }
 
-func (v *socialVerifier) github(ctx context.Context, code, codeVerifier, redirectURI string, cfg oauthProviderConfig) (user.SocialProfile, error) {
+func (v *socialVerifier) github(ctx context.Context, code, codeVerifier, redirectURI string, cfg ProviderConfig) (user.SocialProfile, error) {
 	if strings.TrimSpace(code) == "" || strings.TrimSpace(cfg.ClientID) == "" || strings.TrimSpace(cfg.ClientSecret) == "" {
 		return user.SocialProfile{}, errOAuthInvalidInput
 	}

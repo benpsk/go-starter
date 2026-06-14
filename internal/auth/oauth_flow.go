@@ -1,4 +1,4 @@
-package server
+package auth
 
 import (
 	"crypto/rand"
@@ -10,7 +10,7 @@ import (
 
 var errOAuthFlowNotFound = errors.New("oauth flow not found")
 
-type oauthFlowRecord struct {
+type OAuthFlowRecord struct {
 	State        string
 	Provider     string
 	CodeVerifier string
@@ -21,30 +21,30 @@ type oauthFlowRecord struct {
 type oauthFlowStore struct {
 	mu    sync.Mutex
 	ttl   time.Duration
-	flows map[string]oauthFlowRecord
+	flows map[string]OAuthFlowRecord
 }
 
 func newOAuthFlowStore(ttl time.Duration) *oauthFlowStore {
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}
-	return &oauthFlowStore{ttl: ttl, flows: map[string]oauthFlowRecord{}}
+	return &oauthFlowStore{ttl: ttl, flows: map[string]OAuthFlowRecord{}}
 }
 
-func (s *oauthFlowStore) create(provider, redirectTo string, now time.Time) (oauthFlowRecord, error) {
+func (s *oauthFlowStore) create(provider, redirectTo string, now time.Time) (OAuthFlowRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cleanupLocked(now)
 
 	state, err := randomToken(24)
 	if err != nil {
-		return oauthFlowRecord{}, err
+		return OAuthFlowRecord{}, err
 	}
 	verifier, err := randomToken(32)
 	if err != nil {
-		return oauthFlowRecord{}, err
+		return OAuthFlowRecord{}, err
 	}
-	record := oauthFlowRecord{
+	record := OAuthFlowRecord{
 		State:        state,
 		Provider:     provider,
 		CodeVerifier: verifier,
@@ -55,18 +55,18 @@ func (s *oauthFlowStore) create(provider, redirectTo string, now time.Time) (oau
 	return record, nil
 }
 
-func (s *oauthFlowStore) consume(state, provider string, now time.Time) (oauthFlowRecord, error) {
+func (s *oauthFlowStore) consume(state, provider string, now time.Time) (OAuthFlowRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cleanupLocked(now)
 
 	record, ok := s.flows[state]
 	if !ok {
-		return oauthFlowRecord{}, errOAuthFlowNotFound
+		return OAuthFlowRecord{}, errOAuthFlowNotFound
 	}
 	delete(s.flows, state)
 	if record.Provider != provider || now.After(record.ExpiresAt) {
-		return oauthFlowRecord{}, errOAuthFlowNotFound
+		return OAuthFlowRecord{}, errOAuthFlowNotFound
 	}
 	return record, nil
 }

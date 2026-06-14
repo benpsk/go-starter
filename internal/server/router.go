@@ -7,8 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/benpsk/go-starter/internal/auth"
 	"github.com/benpsk/go-starter/internal/config"
+	"github.com/benpsk/go-starter/internal/httpapi"
 	"github.com/benpsk/go-starter/internal/storage"
+	"github.com/benpsk/go-starter/internal/web"
 	webstatic "github.com/benpsk/go-starter/static"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -34,38 +37,30 @@ func NewRouter(cfg config.Config, db *pgxpool.Pool, store storage.Store) *chi.Mu
 	r.Use(csrfProtection)
 	r.Use(middleware.Recoverer)
 
+	authService := auth.NewService(db, cfg)
+	authRateLimiter := auth.NewRateLimiter(auth.DefaultRateLimitRequests, auth.DefaultRateLimitWindow)
+	webHandler := web.NewHandler(cfg, authService)
+	apiHandler := httpapi.NewHandler(db, authService)
+
 	staticFS := webstatic.FileSystem()
 	if _, err := os.Stat("static"); err == nil {
 		staticFS = http.Dir("static")
 	}
 
-	h := newHandler(db, cfg, store)
-	authRateLimiter := newAuthRateLimiter(defaultAuthRateLimitRequests, defaultAuthRateLimitWindow)
-	r.Use(h.loadSession)
+	_ = store
+	r.Use(authService.LoadSession)
 
-	r.NotFound(h.notFoundPage)
-	r.MethodNotAllowed(h.methodNotAllowedPage)
+	r.NotFound(webHandler.NotFound)
+	r.MethodNotAllowed(webHandler.MethodNotAllowed)
 
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(staticFS)))
 	if cfg.Storage.Driver == "local" {
 		mediaPrefix := strings.TrimRight(cfg.Storage.LocalPublicPath, "/") + "/"
 		r.Handle(mediaPrefix+"*", http.StripPrefix(mediaPrefix, http.FileServer(http.Dir(cfg.Storage.LocalDir))))
 	}
-	r.Get("/", h.homePage)
-	r.Get("/about", h.aboutPage)
-	r.With(h.requireGuest).Get("/auth/login", h.loginPage)
-	r.With(authRateLimiter.limitByIP("web_oauth_start"), h.requireGuest).Post("/auth/login/{provider}", h.startSocialLogin)
-	r.With(h.requireGuest).Get("/auth/callback/{provider}", h.oauthCallback)
-	r.With(h.requireAuth).Get("/account", h.accountPage)
-	r.With(h.requireAuth).Post("/auth/logout", h.logout)
-	r.Route("/api/auth", func(r chi.Router) {
-		r.With(authRateLimiter.limitByIP("api_auth_login")).Post("/login/{provider}", h.apiLogin)
-		r.With(authRateLimiter.limitByIP("api_auth_refresh")).Post("/refresh", h.apiRefresh)
-		r.Post("/logout", h.apiLogout)
-		r.With(h.requireAPIAuth).Get("/me", h.apiMe)
-	})
-	r.Get("/healthz", h.healthz)
-	r.Get("/api/health", h.healthz)
+	r.Get("/healthz", apiHandler.Health)
+	r.Mount("/api", httpapi.Routes(apiHandler, authRateLimiter))
+	r.Mount("/", web.Routes(webHandler, authRateLimiter))
 
 	return r
 }

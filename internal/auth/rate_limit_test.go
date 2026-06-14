@@ -1,4 +1,4 @@
-package server
+package auth
 
 import (
 	"net/http"
@@ -7,15 +7,15 @@ import (
 	"time"
 )
 
-func TestAuthRateLimiterMiddlewareBlocksAfterLimitAndResets(t *testing.T) {
+func TestRateLimiterMiddlewareBlocksAfterLimitAndResets(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 2, 24, 12, 0, 0, 0, time.UTC)
-	limiter := newAuthRateLimiter(2, time.Minute)
-	limiter.now = func() time.Time { return now }
+	limiter := NewRateLimiter(2, time.Minute)
+	limiter.SetNowForTest(func() time.Time { return now })
 
 	hitCount := 0
-	handler := limiter.limitByIP("api_auth_refresh")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := limiter.LimitByIP("api_auth_refresh")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hitCount++
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -55,11 +55,11 @@ func TestAuthRateLimiterMiddlewareBlocksAfterLimitAndResets(t *testing.T) {
 	}
 }
 
-func TestAuthRateLimiterMiddlewareKeysByClientIP(t *testing.T) {
+func TestRateLimiterMiddlewareKeysByClientIP(t *testing.T) {
 	t.Parallel()
 
-	limiter := newAuthRateLimiter(1, time.Minute)
-	handler := limiter.limitByIP("web_oauth_start")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	limiter := NewRateLimiter(1, time.Minute)
+	handler := limiter.LimitByIP("web_oauth_start")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
@@ -100,8 +100,8 @@ func TestNormalizedClientIP(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "/", nil)
 			r.RemoteAddr = tt.remoteAddr
-			if got := normalizedClientIP(r); got != tt.want {
-				t.Fatalf("normalizedClientIP(%q) = %q, want %q", tt.remoteAddr, got, tt.want)
+			if got := NormalizedClientIP(r); got != tt.want {
+				t.Fatalf("NormalizedClientIP(%q) = %q, want %q", tt.remoteAddr, got, tt.want)
 			}
 		})
 	}

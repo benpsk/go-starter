@@ -1,4 +1,4 @@
-package server
+package httpapi
 
 import (
 	"bytes"
@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/benpsk/go-starter/internal/auth"
 	"github.com/benpsk/go-starter/internal/config"
+	"github.com/benpsk/go-starter/internal/postgres"
 	"github.com/benpsk/go-starter/internal/user"
 	"github.com/go-chi/chi/v5"
 )
@@ -21,7 +23,7 @@ type fakeSocialVerifier struct {
 	err     error
 }
 
-func (f fakeSocialVerifier) ExchangeAndVerify(ctx context.Context, provider string, code string, codeVerifier string, redirectURI string, cfg oauthProviderConfig) (user.SocialProfile, error) {
+func (f fakeSocialVerifier) ExchangeAndVerify(ctx context.Context, provider string, code string, codeVerifier string, redirectURI string, cfg auth.ProviderConfig) (user.SocialProfile, error) {
 	if f.err != nil {
 		return user.SocialProfile{}, f.err
 	}
@@ -36,8 +38,8 @@ func TestAPILoginIssuesTokensAndSetsRefreshCookie(t *testing.T) {
 	ctx, cleanup := withTx(t)
 	defer cleanup()
 
-	h := testAPIHandler(t)
-	h.verifier = fakeSocialVerifier{
+	authService := testAuthService()
+	authService.SetVerifier(fakeSocialVerifier{
 		profile: user.SocialProfile{
 			Provider:       "github",
 			ProviderUserID: "api-login-" + strconv.FormatInt(time.Now().UnixNano(), 10),
@@ -46,7 +48,8 @@ func TestAPILoginIssuesTokensAndSetsRefreshCookie(t *testing.T) {
 			Name:           "API Login User",
 			Username:       "apilogin",
 		},
-	}
+	})
+	h := NewHandler(integrationPool, authService)
 
 	body := map[string]any{
 		"code":          "code-1",
@@ -58,17 +61,17 @@ func TestAPILoginIssuesTokensAndSetsRefreshCookie(t *testing.T) {
 	req = withURLParam(req, "provider", "github")
 	rec := httptest.NewRecorder()
 
-	h.apiLogin(rec, req)
+	h.login(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	var payload struct {
-		TokenType    string              `json:"token_type"`
-		AccessToken  string              `json:"access_token"`
-		RefreshToken string              `json:"refresh_token"`
-		User         apiAuthUserResponse `json:"user"`
+		TokenType    string       `json:"token_type"`
+		AccessToken  string       `json:"access_token"`
+		RefreshToken string       `json:"refresh_token"`
+		User         userResponse `json:"user"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -79,15 +82,16 @@ func TestAPILoginIssuesTokensAndSetsRefreshCookie(t *testing.T) {
 	if payload.User.ID == 0 {
 		t.Fatalf("expected user in response")
 	}
-	assertRefreshCookieSet(t, rec, h.apiRefreshCookieName)
+	assertRefreshCookieSet(t, rec, authService.APIRefreshCookieName())
 }
 
 func TestAPIRefreshRotatesAndDetectsReuse(t *testing.T) {
 	ctx := context.Background()
 
-	h := testAPIHandler(t)
-	u, _, _ := insertUserAndSession(t, ctx, h.users)
-	issued, err := h.issueAPITokenPair(ctx, u.ID, time.Now())
+	authService := testAuthService()
+	h := NewHandler(integrationPool, authService)
+	u, _, _ := insertUserAndSession(t, ctx, authService.Users())
+	issued, err := authService.IssueAPITokenPair(ctx, u.ID, time.Now())
 	if err != nil {
 		t.Fatalf("issue api token pair: %v", err)
 	}
@@ -95,11 +99,11 @@ func TestAPIRefreshRotatesAndDetectsReuse(t *testing.T) {
 	refreshReq := jsonRequest(t, http.MethodPost, "/api/auth/refresh", map[string]any{"refresh_token": issued.RefreshToken})
 	refreshReq = refreshReq.WithContext(ctx)
 	refreshRec := httptest.NewRecorder()
-	h.apiRefresh(refreshRec, refreshReq)
+	h.refresh(refreshRec, refreshReq)
 	if refreshRec.Code != http.StatusOK {
 		t.Fatalf("unexpected refresh status: %d body=%s", refreshRec.Code, refreshRec.Body.String())
 	}
-	var refreshPayload apiTokenResponse
+	var refreshPayload auth.APITokenResponse
 	if err := json.Unmarshal(refreshRec.Body.Bytes(), &refreshPayload); err != nil {
 		t.Fatalf("decode refresh response: %v", err)
 	}
@@ -113,16 +117,15 @@ func TestAPIRefreshRotatesAndDetectsReuse(t *testing.T) {
 	reuseReq := jsonRequest(t, http.MethodPost, "/api/auth/refresh", map[string]any{"refresh_token": issued.RefreshToken})
 	reuseReq = reuseReq.WithContext(ctx)
 	reuseRec := httptest.NewRecorder()
-	h.apiRefresh(reuseRec, reuseReq)
+	h.refresh(reuseRec, reuseReq)
 	if reuseRec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected unauthorized on reuse, got %d", reuseRec.Code)
 	}
 
-	// Family should be revoked after reuse detection, so the rotated token should also fail.
 	revokedFamilyReq := jsonRequest(t, http.MethodPost, "/api/auth/refresh", map[string]any{"refresh_token": refreshPayload.RefreshToken})
 	revokedFamilyReq = revokedFamilyReq.WithContext(ctx)
 	revokedFamilyRec := httptest.NewRecorder()
-	h.apiRefresh(revokedFamilyRec, revokedFamilyReq)
+	h.refresh(revokedFamilyRec, revokedFamilyReq)
 	if revokedFamilyRec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected unauthorized after family revocation, got %d", revokedFamilyRec.Code)
 	}
@@ -131,9 +134,10 @@ func TestAPIRefreshRotatesAndDetectsReuse(t *testing.T) {
 func TestAPILogoutRevokesRefreshToken(t *testing.T) {
 	ctx := context.Background()
 
-	h := testAPIHandler(t)
-	u, _, _ := insertUserAndSession(t, ctx, h.users)
-	issued, err := h.issueAPITokenPair(ctx, u.ID, time.Now())
+	authService := testAuthService()
+	h := NewHandler(integrationPool, authService)
+	u, _, _ := insertUserAndSession(t, ctx, authService.Users())
+	issued, err := authService.IssueAPITokenPair(ctx, u.ID, time.Now())
 	if err != nil {
 		t.Fatalf("issue api token pair: %v", err)
 	}
@@ -141,14 +145,14 @@ func TestAPILogoutRevokesRefreshToken(t *testing.T) {
 	req := jsonRequest(t, http.MethodPost, "/api/auth/logout", map[string]any{"refresh_token": issued.RefreshToken})
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
-	h.apiLogout(rec, req)
+	h.logout(rec, req)
 
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("unexpected status: %d", rec.Code)
 	}
-	assertCookieCleared(t, rec, h.apiRefreshCookieName)
+	assertCookieCleared(t, rec, authService.APIRefreshCookieName())
 
-	row, err := h.users.GetAPIRefreshTokenByHash(ctx, hashToken(issued.RefreshToken))
+	row, err := authService.Users().GetAPIRefreshTokenByHash(ctx, auth.HashToken(issued.RefreshToken))
 	if err != nil {
 		t.Fatalf("load refresh token: %v", err)
 	}
@@ -161,9 +165,10 @@ func TestAPIMeRequiresValidJWT(t *testing.T) {
 	ctx, cleanup := withTx(t)
 	defer cleanup()
 
-	h := testAPIHandler(t)
-	u, _, _ := insertUserAndSession(t, ctx, h.users)
-	accessToken, _, err := h.issueAPIAccessToken(u.ID, "api-session-family-1", time.Now())
+	authService := testAuthService()
+	h := NewHandler(integrationPool, authService)
+	u, _, _ := insertUserAndSession(t, ctx, authService.Users())
+	accessToken, _, err := authService.IssueAPIAccessToken(u.ID, "api-session-family-1", time.Now())
 	if err != nil {
 		t.Fatalf("issue access token: %v", err)
 	}
@@ -173,12 +178,12 @@ func TestAPIMeRequiresValidJWT(t *testing.T) {
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
 
-	h.requireAPIAuth(http.HandlerFunc(h.apiMe)).ServeHTTP(rec, req)
+	h.requireAPIAuth(http.HandlerFunc(h.me)).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d body=%s", rec.Code, rec.Body.String())
 	}
-	var payload apiAuthUserResponse
+	var payload userResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode me response: %v", err)
 	}
@@ -191,8 +196,9 @@ func TestAPILoginHandlesVerifierFailure(t *testing.T) {
 	ctx, cleanup := withTx(t)
 	defer cleanup()
 
-	h := testAPIHandler(t)
-	h.verifier = fakeSocialVerifier{err: errors.New("oauth failed")}
+	authService := testAuthService()
+	authService.SetVerifier(fakeSocialVerifier{err: errors.New("oauth failed")})
+	h := NewHandler(integrationPool, authService)
 
 	req := jsonRequest(t, http.MethodPost, "/api/auth/login/google", map[string]any{
 		"code":          "code",
@@ -202,14 +208,13 @@ func TestAPILoginHandlesVerifierFailure(t *testing.T) {
 	req = req.WithContext(ctx)
 	req = withURLParam(req, "provider", "google")
 	rec := httptest.NewRecorder()
-	h.apiLogin(rec, req)
+	h.login(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected unauthorized, got %d", rec.Code)
 	}
 }
 
-func testAPIHandler(t *testing.T) handler {
-	t.Helper()
+func testAuthService() *auth.Service {
 	cfg := config.Config{
 		AppName: "Go Starter",
 		AppEnv:  "test",
@@ -229,7 +234,7 @@ func testAPIHandler(t *testing.T) handler {
 			},
 		},
 	}
-	return newHandler(integrationPool, cfg, nil)
+	return auth.NewService(integrationPool, cfg)
 }
 
 func jsonRequest(t *testing.T, method, path string, body any) *http.Request {
@@ -245,6 +250,47 @@ func jsonRequest(t *testing.T, method, path string, body any) *http.Request {
 	return req
 }
 
+func insertUserAndSession(t *testing.T, ctx context.Context, store *postgres.UserAuthStore) (user.User, string, int64) {
+	t.Helper()
+	suffix := time.Now().UnixNano()
+
+	profile := user.SocialProfile{
+		Provider:       "github",
+		ProviderUserID: "gh-test-" + strconv.FormatInt(suffix, 10),
+		Email:          "tester+" + strconv.FormatInt(suffix, 10) + "@example.com",
+		EmailVerified:  true,
+		Name:           "Tester",
+		Username:       "tester",
+	}
+	u, err := store.CreateUserWithIdentity(ctx, profile)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	rawToken := "raw-test-token-" + strconv.FormatInt(suffix, 10)
+	err = store.CreateSession(ctx, user.Session{
+		UserID:     u.ID,
+		TokenHash:  auth.HashToken(rawToken),
+		ExpiresAt:  time.Now().Add(24 * time.Hour),
+		LastSeenAt: time.Now(),
+		IP:         "127.0.0.1",
+		UserAgent:  "test",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	var sessionID int64
+	err = postgres.DBFromContext(ctx, integrationPool).QueryRow(ctx, `
+		select id
+		from user_sessions
+		where token_hash = $1
+	`, auth.HashToken(rawToken)).Scan(&sessionID)
+	if err != nil {
+		t.Fatalf("lookup session id: %v", err)
+	}
+	return u, rawToken, sessionID
+}
+
 func assertRefreshCookieSet(t *testing.T, rec *httptest.ResponseRecorder, cookieName string) {
 	t.Helper()
 	for _, c := range rec.Result().Cookies() {
@@ -253,6 +299,16 @@ func assertRefreshCookieSet(t *testing.T, rec *httptest.ResponseRecorder, cookie
 		}
 	}
 	t.Fatalf("expected refresh cookie %q to be set", cookieName)
+}
+
+func assertCookieCleared(t *testing.T, rec *httptest.ResponseRecorder, cookieName string) {
+	t.Helper()
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == cookieName && c.MaxAge < 0 {
+			return
+		}
+	}
+	t.Fatalf("expected cleared cookie %q", cookieName)
 }
 
 func withURLParam(req *http.Request, key, value string) *http.Request {

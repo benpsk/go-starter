@@ -1,4 +1,4 @@
-package server
+package web
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/benpsk/go-starter/internal/auth"
 	"github.com/benpsk/go-starter/internal/config"
 	"github.com/benpsk/go-starter/internal/postgres"
 	"github.com/benpsk/go-starter/internal/user"
@@ -17,17 +18,17 @@ func TestLoadSessionAttachesCurrentUserFromCookie(t *testing.T) {
 	ctx, cleanup := withTx(t)
 	defer cleanup()
 
-	h := testHandler(t)
-	u, rawToken, _ := insertUserAndSession(t, ctx, h.users)
+	authService := testAuthService()
+	u, rawToken, _ := insertUserAndSession(t, ctx, authService.Users())
 
 	req := httptest.NewRequest(http.MethodGet, "/account", nil)
-	req.AddCookie(&http.Cookie{Name: h.sessionCookieName, Value: rawToken})
+	req.AddCookie(&http.Cookie{Name: authService.SessionCookieName(), Value: rawToken})
 	rec := httptest.NewRecorder()
 
 	called := false
-	h.loadSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	authService.LoadSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		current := currentUserFromContext(r)
+		current := auth.CurrentUserFromRequest(r)
 		if current == nil {
 			t.Fatalf("expected current user in context")
 		}
@@ -50,8 +51,8 @@ func TestLoadSessionExpiredOrRevokedClearsCookieAndSkipsAuthContext(t *testing.T
 		ctx, cleanup := withTx(t)
 		defer cleanup()
 
-		h := testHandler(t)
-		_, rawToken, sessionID := insertUserAndSession(t, ctx, h.users)
+		authService := testAuthService()
+		_, rawToken, sessionID := insertUserAndSession(t, ctx, authService.Users())
 		_, err := postgres.DBFromContext(ctx, integrationPool).Exec(ctx, `
 			update user_sessions
 			set expires_at = now() - interval '1 minute'
@@ -62,25 +63,25 @@ func TestLoadSessionExpiredOrRevokedClearsCookieAndSkipsAuthContext(t *testing.T
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/account", nil)
-		req.AddCookie(&http.Cookie{Name: h.sessionCookieName, Value: rawToken})
+		req.AddCookie(&http.Cookie{Name: authService.SessionCookieName(), Value: rawToken})
 		rec := httptest.NewRecorder()
 
-		h.loadSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if currentUserFromContext(r) != nil {
+		authService.LoadSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if auth.CurrentUserFromRequest(r) != nil {
 				t.Fatalf("did not expect current user for expired session")
 			}
 			w.WriteHeader(http.StatusNoContent)
 		})).ServeHTTP(rec, req.WithContext(ctx))
 
-		assertCookieCleared(t, rec, h.sessionCookieName)
+		assertCookieCleared(t, rec, authService.SessionCookieName())
 	})
 
 	t.Run("revoked session", func(t *testing.T) {
 		ctx, cleanup := withTx(t)
 		defer cleanup()
 
-		h := testHandler(t)
-		_, rawToken, sessionID := insertUserAndSession(t, ctx, h.users)
+		authService := testAuthService()
+		_, rawToken, sessionID := insertUserAndSession(t, ctx, authService.Users())
 		_, err := postgres.DBFromContext(ctx, integrationPool).Exec(ctx, `
 			update user_sessions
 			set revoked_at = now()
@@ -91,27 +92,27 @@ func TestLoadSessionExpiredOrRevokedClearsCookieAndSkipsAuthContext(t *testing.T
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/account", nil)
-		req.AddCookie(&http.Cookie{Name: h.sessionCookieName, Value: rawToken})
+		req.AddCookie(&http.Cookie{Name: authService.SessionCookieName(), Value: rawToken})
 		rec := httptest.NewRecorder()
 
-		h.loadSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if currentUserFromContext(r) != nil {
+		authService.LoadSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if auth.CurrentUserFromRequest(r) != nil {
 				t.Fatalf("did not expect current user for revoked session")
 			}
 			w.WriteHeader(http.StatusNoContent)
 		})).ServeHTTP(rec, req.WithContext(ctx))
 
-		assertCookieCleared(t, rec, h.sessionCookieName)
+		assertCookieCleared(t, rec, authService.SessionCookieName())
 	})
 }
 
 func TestRequireAuthAndRequireGuest(t *testing.T) {
-	h := testHandler(t)
+	authService := testAuthService()
 
 	t.Run("requireAuth redirects guest", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/account", nil)
 		rec := httptest.NewRecorder()
-		h.requireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authService.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			t.Fatal("should not call downstream")
 		})).ServeHTTP(rec, req)
 
@@ -125,9 +126,9 @@ func TestRequireAuthAndRequireGuest(t *testing.T) {
 
 	t.Run("requireGuest redirects authenticated user", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/auth/login", nil)
-		req = req.WithContext(context.WithValue(req.Context(), currentUserContextKey, &user.User{ID: 1}))
+		req = req.WithContext(auth.ContextWithCurrentUser(req.Context(), &user.User{ID: 1}))
 		rec := httptest.NewRecorder()
-		h.requireGuest(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authService.RequireGuest(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			t.Fatal("should not call downstream")
 		})).ServeHTTP(rec, req)
 
@@ -144,10 +145,11 @@ func TestLogoutDeletesCurrentSessionAndClearsCookie(t *testing.T) {
 	ctx, cleanup := withTx(t)
 	defer cleanup()
 
-	h := testHandler(t)
-	_, rawToken, _ := insertUserAndSession(t, ctx, h.users)
+	authService := testAuthService()
+	h := NewHandler(testConfig(), authService)
+	_, rawToken, _ := insertUserAndSession(t, ctx, authService.Users())
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
-	req.AddCookie(&http.Cookie{Name: h.sessionCookieName, Value: rawToken})
+	req.AddCookie(&http.Cookie{Name: authService.SessionCookieName(), Value: rawToken})
 	rec := httptest.NewRecorder()
 
 	h.logout(rec, req.WithContext(ctx))
@@ -159,25 +161,19 @@ func TestLogoutDeletesCurrentSessionAndClearsCookie(t *testing.T) {
 		t.Fatalf("unexpected redirect: %q", got)
 	}
 
-	if _, _, err := h.users.FindSessionAndUserByTokenHash(ctx, hashToken(rawToken)); err == nil {
+	if _, _, err := authService.Users().FindSessionAndUserByTokenHash(ctx, auth.HashToken(rawToken)); err == nil {
 		t.Fatalf("expected session to be deleted")
 	}
 
-	foundClear := false
-	for _, c := range rec.Result().Cookies() {
-		if c.Name == h.sessionCookieName && c.MaxAge < 0 {
-			foundClear = true
-			break
-		}
-	}
-	if !foundClear {
-		t.Fatalf("expected cleared session cookie")
-	}
+	assertCookieCleared(t, rec, authService.SessionCookieName())
 }
 
-func testHandler(t *testing.T) handler {
-	t.Helper()
-	cfg := config.Config{
+func testAuthService() *auth.Service {
+	return auth.NewService(integrationPool, testConfig())
+}
+
+func testConfig() config.Config {
+	return config.Config{
 		AppName: "Go Starter",
 		AppEnv:  "test",
 		AppURL:  "http://127.0.0.1:8080",
@@ -186,7 +182,6 @@ func testHandler(t *testing.T) handler {
 			SessionTTL:        30 * 24 * time.Hour,
 		},
 	}
-	return newHandler(integrationPool, cfg, nil)
 }
 
 func insertUserAndSession(t *testing.T, ctx context.Context, store *postgres.UserAuthStore) (user.User, string, int64) {
@@ -209,7 +204,7 @@ func insertUserAndSession(t *testing.T, ctx context.Context, store *postgres.Use
 	rawToken := "raw-test-token-" + strconv.FormatInt(suffix, 10)
 	err = store.CreateSession(ctx, user.Session{
 		UserID:     u.ID,
-		TokenHash:  hashToken(rawToken),
+		TokenHash:  auth.HashToken(rawToken),
 		ExpiresAt:  time.Now().Add(24 * time.Hour),
 		LastSeenAt: time.Now(),
 		IP:         "127.0.0.1",
@@ -223,7 +218,7 @@ func insertUserAndSession(t *testing.T, ctx context.Context, store *postgres.Use
 		select id
 		from user_sessions
 		where token_hash = $1
-	`, hashToken(rawToken)).Scan(&sessionID)
+	`, auth.HashToken(rawToken)).Scan(&sessionID)
 	if err != nil {
 		t.Fatalf("lookup session id: %v", err)
 	}
