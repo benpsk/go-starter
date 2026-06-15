@@ -39,7 +39,6 @@ Minimal Go web starter extracted from the Tokio Focus server stack.
 - `internal/server` is the HTTP composition layer: global middleware, static files, and route mounting.
 - `internal/api` owns JSON API routes and handlers.
 - `internal/web` owns browser routes, handlers, templ pages/components, and web assets.
-- `internal/auth` contains shared auth/session/OAuth/JWT helpers used by API and web handlers.
 - `internal/postgres` contains database access and migration helpers.
 - `db` contains embedded migrations and seeders.
 
