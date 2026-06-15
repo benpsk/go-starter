@@ -37,7 +37,7 @@ Minimal Go web starter extracted from the Tokio Focus server stack.
 - `cmd/app` wires config, database, storage, router, and server startup.
 - `cmd/cli` contains database maintenance commands.
 - `internal/server` is the HTTP composition layer: global middleware, static files, and route mounting.
-- `internal/httpapi` owns JSON API routes and handlers.
+- `internal/api` owns JSON API routes and handlers.
 - `internal/web` owns browser routes, handlers, templ pages/components, and web assets.
 - `internal/auth` contains shared auth/session/OAuth/JWT helpers used by API and web handlers.
 - `internal/postgres` contains database access and migration helpers.
@@ -47,9 +47,9 @@ Minimal Go web starter extracted from the Tokio Focus server stack.
 
 - Keep `internal/server` small. It should compose global middleware, static files, and mounted routers.
 - Keep domain packages transport-free. For example, `internal/products` should contain product models, services, stores, and business rules, not HTTP handlers.
-- Put JSON API routes/handlers in `internal/httpapi`, e.g. `products_routes.go` and `products_api_handler.go`.
+- Put JSON API routes/handlers in `internal/api`, e.g. `products_routes.go` and `products_api_handler.go`.
 - Put browser routes/handlers in `internal/web`, e.g. `products_routes.go` and `products_handler.go`.
-- Put middleware near the transport that uses it: API-only middleware in `internal/httpapi`, web-only middleware in `internal/web`, and truly global middleware in `internal/server`.
+- Put middleware near the transport that uses it: API-only middleware in `internal/api`, web-only middleware in `internal/web`, and truly global middleware in `internal/server`.
 - Promote code to shared packages only when multiple packages need it, like `internal/auth`.
 
 ## Notes

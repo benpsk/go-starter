@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/benpsk/go-starter/internal/api"
 	"github.com/benpsk/go-starter/internal/auth"
 	"github.com/benpsk/go-starter/internal/config"
-	"github.com/benpsk/go-starter/internal/httpapi"
 	"github.com/benpsk/go-starter/internal/storage"
 	"github.com/benpsk/go-starter/internal/web"
 	webstatic "github.com/benpsk/go-starter/static"
@@ -40,7 +40,7 @@ func NewRouter(cfg config.Config, db *pgxpool.Pool, store storage.Store) *chi.Mu
 	authService := auth.NewService(db, cfg)
 	authRateLimiter := auth.NewRateLimiter(auth.DefaultRateLimitRequests, auth.DefaultRateLimitWindow)
 	webHandler := web.NewHandler(cfg, authService)
-	apiHandler := httpapi.NewHandler(db, authService)
+	apiHandler := api.NewHandler(db, authService)
 
 	staticFS := webstatic.FileSystem()
 	if _, err := os.Stat("static"); err == nil {
@@ -59,7 +59,7 @@ func NewRouter(cfg config.Config, db *pgxpool.Pool, store storage.Store) *chi.Mu
 		r.Handle(mediaPrefix+"*", http.StripPrefix(mediaPrefix, http.FileServer(http.Dir(cfg.Storage.LocalDir))))
 	}
 	r.Get("/healthz", apiHandler.Health)
-	r.Mount("/api", httpapi.Routes(apiHandler, authRateLimiter))
+	r.Mount("/api", api.Routes(apiHandler, authRateLimiter))
 	r.Mount("/", web.Routes(webHandler, authRateLimiter))
 
 	return r
