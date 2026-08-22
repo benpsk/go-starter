@@ -19,7 +19,7 @@ A minimal Go web + JSON API starter with a layered, domain-driven structure.
 2. Install frontend deps: `npm install`
 3. Build assets and generated templates: `make assets`
 4. Run migrations: `make migrate`
-5. Start the server: `make live` (or `go run ./cmd/app`)
+5. Start the server: `make live` (or `go run ./cmd/app serve`)
 
 `.env` is loaded automatically by both binaries, so `go run ./cmd/app` works
 without sourcing anything first.
@@ -29,29 +29,33 @@ without sourcing anything first.
 | Command | Purpose |
 |---|---|
 | `make live` | dev mode: templ, Go server, and asset watchers |
-| `make build` | build assets and both binaries into `tmp/bin/` |
+| `make build` | build assets and the binary into `tmp/bin/` |
 | `make assets` | generate templ output and bundle static assets |
 | `make test` | run tests |
 | `make test-race` | run tests with the race detector |
 | `make test-cover` | report core coverage |
 | `make test-cover-gate` | fail below `COVERAGE_MIN` (80%) |
-| `make migrate` / `seed` / `fresh` | database scripts |
+| `make migrate` / `seed` / `status` / `fresh` | database commands |
 | `make migrate-test` / `fresh-test` / `fresh-seed-test` | same against `.env.test` |
 | `make dump` | dump the database with `pg_dump` |
-| `make build-prod` | build production binaries |
+| `make cmd ARGS="db:status"` | run any console command |
+| `make build-prod` | build the production binary |
 
 ## Architecture
 
-Wiring happens in exactly one place. `cmd/app/main.go` is the composition root:
-it loads configuration, opens the pool, builds every repository, builds every
-service, packs them into `appsvc.Services`, and hands that to the router.
+Wiring happens in exactly one place. `internal/app` is the composition root: it
+opens the pool, builds every repository, builds every service, packs them into
+`appsvc.Services`, and hands that to whichever entrypoint asked. `cmd/app` is a
+dispatcher — it resolves a command and maps the outcome to an exit code.
 
 ```
-cmd/app/main.go          config -> pool -> repositories -> services -> Services
+cmd/app/main.go          argv -> command; registers `serve`
+  ├─ internal/console    the command transport: db:*, cron:*, help, version
   └─ internal/server     global middleware, static files, /healthz, /readyz
        ├─ internal/web   browser routes, handlers, templ pages   (web.Mount)
        └─ internal/api   JSON routes and handlers                (api.Mount)
 
+internal/app             config -> pool -> repositories -> services -> Services
 internal/<domain>        Service + Repository interfaces, models, business rules
 internal/postgres        Repository implementations over a shared Querier
 ```
@@ -66,13 +70,18 @@ Each layer only knows the one below it:
   both `*pgxpool.Pool` and `pgx.Tx` satisfy.
 - **Transports** (`internal/web`, `internal/api`) hold only the services they
   use. They never see a database handle.
-- **`internal/server`** composes middleware and mounts the two transports. It
-  constructs nothing else.
+- **`internal/server`** composes middleware and mounts the two HTTP transports.
+  It constructs nothing else.
+- **`internal/console`** is a third transport, serving argv the way the others
+  serve HTTP. It imports neither `server`, `web`, nor `api`: `serve` is
+  registered from `cmd/app`, so the import graph makes it impossible for a
+  console command to reach a handler.
 
 ### Layout
 
-- `cmd/app` — HTTP server and composition root.
-- `cmd/cli` — `migrate`, `seed`, `fresh`, `dump`.
+- `cmd/app` — the single entrypoint: argv dispatch, and the `serve` command.
+- `internal/app` — the composition root, built lazily in tiers.
+- `internal/console` — the command transport (`db:*`, `cron:*`, `help`, `version`).
 - `internal/server` — HTTP composition layer plus the health handler.
 - `internal/appsvc` — the `Services` aggregate (aliased as `server.Services`).
 - `internal/api` — JSON routes, handlers, response envelope, bearer auth.
@@ -108,6 +117,105 @@ api.Success(w, http.StatusOK, payload)
 Success responses are enveloped as `{"data": ...}` (or `{"message": ...}` for a
 bare string). Errors are `{"errors": {...}}` plus an optional `"code"`. The
 internal cause is logged, never sent to the client.
+
+## Commands
+
+One binary, one composition root. `./app` with no arguments prints the command
+list and exits non-zero, so a stray invocation in a script cannot start a
+server.
+
+```
+Serving
+  serve                      Start the HTTP server        --addr
+
+Database
+  db:migrate                 Apply pending migrations     --path --file --force
+  db:seed                    Apply pending seeders        --path --file --force --all
+  db:status                  Applied and pending, both kinds
+  db:fresh                   Drop, recreate, migrate      --seed --path --seed-path
+  db:dump                    Dump via pg_dump             --out --format --clean
+                                                          --schema-only --data-only
+                                                          --exclude-table --exclude-table-data
+
+Maintenance
+  cron:prune-sessions        Delete expired/revoked sessions        --older-than
+  cron:prune-refresh-tokens  Delete expired/revoked refresh tokens  --older-than
+
+Other
+  help [command]             Command list, or one command's flags
+  version                    Version and build information
+```
+
+Dependencies are built lazily, so a command pays only for what it uses:
+
+| | config | pool | services | http |
+|---|---|---|---|---|
+| `help`, `version` | | | | |
+| `db:dump` | ✓ | | | |
+| `db:*` | ✓ | ✓ | | |
+| `cron:prune-sessions` | ✓ | ✓ | | |
+| `cron:prune-refresh-tokens` | ✓ | ✓ | ✓ | |
+| `serve` | ✓ | ✓ | ✓ | ✓ |
+
+`help` and `version` work before there is a valid `.env`, because dispatch never
+loads configuration for them.
+
+Exit codes: `0` success, `1` the command ran and failed, `2` misuse — an unknown
+command, a bad flag, or a guard refusing (`db:fresh` outside development).
+
+### Dumping
+
+`db:dump` always passes `--no-owner --no-privileges`, so the output contains no
+`OWNER TO` or `GRANT` statements and restores into any server as any role. That
+is what avoids `role "..." does not exist` on import.
+
+```
+app db:dump                                  # plain SQL, restore with psql
+app db:dump --clean                          # adds guarded DROPs, so it restores
+                                             #   over an existing database
+app db:dump --format=custom                  # archive, restore with pg_restore
+app db:dump --exclude-table=user_sessions    # omit the table entirely
+app db:dump --exclude-table-data=users       # keep the schema, omit the rows
+```
+
+Both exclude flags are repeatable and accept patterns. Prefer
+`--exclude-table-data` when you want a shareable dump: dropping a table outright
+breaks the foreign keys that reference it, while dropping only its rows leaves a
+dump that still restores cleanly.
+
+Two format notes. A plain dump from PostgreSQL 18 contains `\restrict`
+meta-commands, which only `psql` understands — use `--format=custom` if you
+import with anything else. And `--clean` cannot be combined with `--data-only`,
+because there is no schema to drop.
+
+### Re-running a file
+
+Both kinds are tracked in one table, `schema_history (kind, name, applied_at)`,
+keyed on the pair so a seeder can share a filename with a migration without
+being mistaken for it. Re-applying updates `applied_at`, so a row reads as *last*
+applied.
+
+Seeders are written to be idempotent, so re-running one is supported:
+
+```
+app db:seed --force --file=000002_products.sql   # one seeder
+app db:seed --force --all                        # every seeder, asked for explicitly
+```
+
+Migrations are not idempotent, so re-running one is deliberately hard. It needs
+`--file` and refuses outside development:
+
+```
+app db:migrate --force --file=000003_add_index.sql   # APP_ENV=development only
+```
+
+If an applied migration is wrong, the answer is a new migration. See AGENTS.md
+for the seeder rules that make `--force` safe.
+
+The `cron:` jobs are meant to be triggered by an external scheduler — a system
+crontab, a Kubernetes CronJob — rather than an in-process loop, so there is no
+scheduler to leader-elect across replicas. Nothing else deletes expired sessions
+or refresh tokens, so without them those tables grow without bound.
 
 ## Endpoints
 

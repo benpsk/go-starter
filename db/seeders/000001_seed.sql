@@ -1,1 +1,13 @@
--- starter seeders intentionally empty
+-- Seeders re-run, so every statement here must be idempotent: running this file
+-- twice must leave the database exactly as running it once did.
+--
+-- Reference rows by natural key and let the conflict target absorb a repeat:
+--
+--   insert into roles (slug, name)
+--   values ('admin', 'Administrator')
+--   on conflict (slug) do nothing;
+--
+-- That needs a unique constraint on the natural key, which belongs in the
+-- migration rather than here. See the seeder rules in AGENTS.md.
+--
+-- The starter ships no seed data.

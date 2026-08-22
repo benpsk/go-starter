@@ -6,9 +6,13 @@ package boundaries clear.
 
 ## Project Structure & Module Organization
 
-- `cmd/app`: HTTP server entrypoint. **This is the composition root** — the only
-  place repositories and services are constructed.
-- `cmd/cli`: migration, seed, and maintenance entrypoint.
+- `cmd/app`: the single entrypoint. It dispatches argv to a command and maps the
+  outcome to an exit code. It registers `serve`, and nothing else.
+- `internal/app`: **the composition root** — the only place repositories and
+  services are constructed. Built lazily so each command pays only for what it
+  uses.
+- `internal/console`: the command transport (`db:*`, `cron:*`, `help`,
+  `version`). Serves argv the way `web` serves browsers.
 - `internal/server`: the HTTP composition layer — global middleware, static
   files, health endpoints, and route mounting. Nothing else.
 - `internal/appsvc`: the `Services` aggregate passed to the transports.
@@ -74,7 +78,9 @@ contracts with web page data unless they are intentionally shared.
 - `make test-cover-html`: write an HTML coverage report.
 - `make test-cover-gate`: fail below `COVERAGE_MIN` (80%).
 - `make tidy` / `make fmt`: `go mod tidy` / `go fmt ./...`.
-- `make migrate` / `make seed` / `make fresh`: database scripts via `cmd/cli`.
+- `make migrate` / `make seed` / `make status` / `make fresh`: database commands.
+- `make cmd ARGS="db:status"`: run any console command.
+- `make serve`: run the HTTP server without the asset watchers.
 - `make migrate-test` / `make fresh-test` / `make fresh-seed-test`: same against
   `.env.test`.
 - `make dump`: create a database dump (needs `pg_dump`).
@@ -140,13 +146,49 @@ contracts with web page data unless they are intentionally shared.
 ## Database & Migrations
 
 - Connect to PostgreSQL via the pgx pool configured in `internal/postgres`.
-- Store raw SQL migrations in `db/migrations`; files run lexicographically
-  through `cmd/cli`.
-- A migration file may contain multiple statements; group related schema changes
-  together.
-- `schema_migrations` and `schema_seeders` track applied files; avoid external
-  migration tooling.
-- `fresh` is refused unless `APP_ENV=development`.
+- Store raw SQL migrations in `db/migrations` and seeders in `db/seeders`; files
+  run lexicographically through `app db:migrate` and `app db:seed`. A deployed
+  binary has no checkout beside it, so the embedded copies are the fallback.
+- A file may contain multiple statements; group related changes together. Each
+  file runs in one transaction, so a failure leaves neither the change nor its
+  record behind.
+- One table tracks both: `schema_history (kind, name, applied_at)`, keyed on
+  `(kind, name)`. Avoid external migration tooling.
+  - The pair is the key, not `name` alone. A seeder sharing a filename with a
+    migration would otherwise be recorded as applied and silently skipped.
+  - Re-applying a file updates `applied_at`, so the row reads as *last* applied.
+- `db:fresh` is refused unless `APP_ENV=development`.
+- `db:dump` always passes `--no-owner --no-privileges`. Keep them: without them
+  the dump carries `OWNER TO` and `GRANT` statements and fails to import on a
+  server that lacks those roles. Prefer `--exclude-table-data` over
+  `--exclude-table` when trimming a dump, so the foreign keys still resolve.
+
+### Migrations
+
+- Migrations are **not** expected to be idempotent, so re-running one is
+  deliberately hard: `db:migrate --force` requires `--file` and refuses to run
+  outside development.
+- If an applied migration is wrong, write a new migration. Reach for
+  `--force` only for a migration you wrote minutes ago on your own machine, and
+  prefer `db:fresh`.
+
+### Seeders
+
+Seeders are re-runnable, so **every seeder must be idempotent**. Running one
+twice must leave the database in the same state as running it once.
+
+- Use `insert ... on conflict do nothing`, or `on conflict (col) do update`.
+  Never a bare `insert`.
+- That needs something to conflict on: a table you seed must have a natural
+  unique constraint. Add it in the migration, not the seeder.
+- Reference rows by natural key, never by a hardcoded `id`. Identity columns
+  shift between environments.
+- No `truncate`, and no unqualified `delete`. A re-runnable file that clears
+  tables will eventually clear real data.
+- No DDL in a seeder. Schema belongs in a migration; this matters more precisely
+  because seeders re-run.
+- Keep a seeder independent of the others. `db:seed --force --file=X` runs X
+  alone, so it cannot assume an earlier file ran in the same pass.
 
 ## Deployment & Security Notes
 
@@ -160,6 +202,25 @@ contracts with web page data unless they are intentionally shared.
 - Confirm CORS settings match the client before release. Production restricts
   origins to `APP_URL`; development allows any origin.
 - Rate limits are skipped for localhost outside production.
+
+## Console Commands
+
+- The console is a transport, not an application. `internal/console` imports
+  neither `internal/server`, `internal/web`, nor `internal/api`; `serve` is
+  registered from `cmd/app` so the import graph enforces that rather than
+  trusting discipline.
+- A command declares `NeedsApp`. `help` and `version` set it false so they work
+  before there is a valid `.env`.
+- Reach for the narrowest accessor a command needs: `a.Config()` opens nothing,
+  `a.Pool(ctx)` opens the pool, `a.Sessions(ctx)` adds the session manager, and
+  `a.Services(ctx)` builds the domain services and the object store.
+- Commands return errors and never call `os.Exit`. Return a `UsageError` for
+  caller mistakes (exit 2) and an ordinary error for failures (exit 1).
+- Commands take flags, not positional arguments, and write to the `io.Writer`
+  they are handed so tests can capture output.
+- Name commands `group:verb`, and put them in the group that matches.
+- New scheduled work is a `cron:` command triggered externally. Do not add an
+  in-process scheduler.
 
 ## Bug Fix Notes
 
