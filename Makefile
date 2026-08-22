@@ -17,9 +17,10 @@ COVER_MERGE := awk '$$0 !~ /^mode:/ { k = $$1 " " $$2; c = $$3 + 0; if (!(k in s
 
 .PHONY: tidy fmt build assets templ css js vendor \
 	test testv test-race test-cover test-cover-html test-cover-gate \
-	migrate seed fresh dump migrate-test fresh-test fresh-seed-test \
+	cmd cmd-test serve migrate seed status fresh dump \
+	migrate-test fresh-test fresh-seed-test \
 	live live/templ live/server live/assets live/sync_assets \
-	clean build-app build-cli build-prod
+	clean build-app build-prod
 
 tidy: ## Download modules and prune unused dependencies
 	@$(GOENV) go mod tidy
@@ -27,10 +28,9 @@ tidy: ## Download modules and prune unused dependencies
 fmt: ## Format Go source files
 	@$(GOENV) go fmt ./...
 
-build: assets ## Generate assets and compile the app binary
+build: assets ## Generate assets and compile the binary
 	@mkdir -p $(BIN_DIR)
 	@$(GOENV) go build -o $(BIN_DIR)/app ./cmd/app
-	@$(GOENV) go build -o $(BIN_DIR)/cli ./cmd/cli
 
 templ: ## Generate templ output
 	templ generate
@@ -79,40 +79,50 @@ test-cover-gate: ## Fail if core coverage is below COVERAGE_MIN
 	echo "core coverage: $$PCT% (min: $(COVERAGE_MIN)%)"; \
 	awk -v got="$$PCT" -v min="$(COVERAGE_MIN)" 'BEGIN { if ((got + 0) < (min + 0)) exit 1 }'
 
-migrate: ## Apply SQL migrations
+# Console commands. `make cmd ARGS="db:status"` reaches anything not aliased
+# below, so this file does not have to grow a target per command.
+cmd: ## Run a console command (usage: make cmd ARGS="db:status")
 	@if [ -f .env ]; then set -a; . .env; set +a; fi; \
-	$(GOENV) go run ./cmd/cli migrate
+	$(GOENV) go run ./cmd/app $(ARGS)
+
+serve: ## Run the HTTP server without the asset watchers
+	@if [ -f .env ]; then set -a; . .env; set +a; fi; \
+	$(GOENV) go run ./cmd/app serve
+
+migrate: ## Apply SQL migrations
+	@$(MAKE) --no-print-directory cmd ARGS="db:migrate"
 
 seed: ## Apply SQL seeders
-	@if [ -f .env ]; then set -a; . .env; set +a; fi; \
-	$(GOENV) go run ./cmd/cli seed
+	@$(MAKE) --no-print-directory cmd ARGS="db:seed"
+
+status: ## Show applied and pending migrations
+	@$(MAKE) --no-print-directory cmd ARGS="db:status"
 
 fresh: ## Drop and recreate the schema, then migrate
-	@if [ -f .env ]; then set -a; . .env; set +a; fi; \
-	$(GOENV) go run ./cmd/cli fresh
+	@$(MAKE) --no-print-directory cmd ARGS="db:fresh"
 
 dump: ## Create a database dump (requires pg_dump)
-	@if [ -f .env ]; then set -a; . .env; set +a; fi; \
-	$(GOENV) go run ./cmd/cli dump
+	@$(MAKE) --no-print-directory cmd ARGS="db:dump"
+
+cmd-test: ## Run a console command against the test database
+	@if [ -f .env.test ]; then set -a; . .env.test; set +a; fi; \
+	$(GOENV) go run ./cmd/app $(ARGS)
 
 migrate-test: ## Apply migrations to the test database
-	@if [ -f .env.test ]; then set -a; . .env.test; set +a; fi; \
-	$(GOENV) go run ./cmd/cli migrate
+	@$(MAKE) --no-print-directory cmd-test ARGS="db:migrate"
 
 fresh-test: ## Reset the test database schema
-	@if [ -f .env.test ]; then set -a; . .env.test; set +a; fi; \
-	$(GOENV) go run ./cmd/cli fresh
+	@$(MAKE) --no-print-directory cmd-test ARGS="db:fresh"
 
 fresh-seed-test: ## Reset and seed the test database
-	@if [ -f .env.test ]; then set -a; . .env.test; set +a; fi; \
-	$(GOENV) go run ./cmd/cli fresh -seed
+	@$(MAKE) --no-print-directory cmd-test ARGS="db:fresh --seed"
 
 # Rebuild and restart the server on any Go file change.
 live/server:
 	@mkdir -p tmp/server $(BIN_DIR)
 	go run github.com/cosmtrek/air@v1.51.0 \
 	--tmp_dir "tmp/server" \
-	--build.cmd "go build -o $(BIN_DIR)/app ./cmd/app" --build.bin "$(BIN_DIR)/app" --build.delay "100" \
+	--build.cmd "go build -o $(BIN_DIR)/app ./cmd/app" --build.bin "$(BIN_DIR)/app serve" --build.delay "100" \
 	--build.exclude_dir "node_modules,tmp,static" \
 	--build.include_ext "go" \
 	--build.stop_on_error "false" \
@@ -150,12 +160,5 @@ build-app: assets ## Build the app binary for Linux
 	go build -o $(BIN_DIR)/app ./cmd/app
 	@echo "Build complete: $(BIN_DIR)/app"
 
-build-cli: ## Build the cli binary for Linux
-	@echo "Building cli binary for Linux..."
-	@mkdir -p $(BIN_DIR)
-	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-	go build -o $(BIN_DIR)/cli ./cmd/cli
-	@echo "Build complete: $(BIN_DIR)/cli"
-
-build-prod: build-app build-cli ## Build all production binaries
-	@echo "All production binaries are in $(BIN_DIR)/"
+build-prod: build-app ## Build the production binary
+	@echo "Production binary is in $(BIN_DIR)/"

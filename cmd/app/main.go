@@ -1,136 +1,129 @@
-// Command app is the HTTP server entrypoint and the composition root of this
-// application: it loads configuration, opens the database, builds every
-// repository and service, and hands the assembled aggregate to the router.
+// Command app is the single entrypoint for this application. It serves HTTP and
+// runs every console command; which one depends on the first argument.
 //
-// Wiring lives here and nowhere else. internal/server composes middleware and
-// mounts transports; it never constructs a service.
+// It is deliberately thin: it resolves the command, builds the dependency graph
+// only if that command needs one, and maps the outcome to an exit code. The
+// wiring lives in internal/app, and the commands live in internal/console.
+//
+// serve is registered here rather than in internal/console, because it is the
+// only command that needs the HTTP layer. Keeping it here means internal/console
+// never imports internal/server, internal/web, or internal/api, so a console
+// command cannot reach a handler even by accident.
 package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
 	_ "github.com/joho/godotenv/autoload"
 
-	usersession "github.com/benpsk/go-starter/internal/auth/user"
+	"github.com/benpsk/go-starter/internal/app"
 	"github.com/benpsk/go-starter/internal/config"
-	healthsvc "github.com/benpsk/go-starter/internal/health"
-	loginsvc "github.com/benpsk/go-starter/internal/login"
-	"github.com/benpsk/go-starter/internal/postgres"
+	"github.com/benpsk/go-starter/internal/console"
 	"github.com/benpsk/go-starter/internal/server"
-	"github.com/benpsk/go-starter/internal/storage"
-	usersvc "github.com/benpsk/go-starter/internal/users"
+)
+
+// Exit codes. Usage mistakes are separated from execution failures so a
+// scheduler or CI step can tell "I called it wrong" from "it ran and broke".
+const (
+	exitOK      = 0
+	exitFailure = 1
+	exitUsage   = 2
 )
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	os.Exit(run())
+}
 
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatalf("config: %v", err)
-	}
-
+func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	db, err := postgres.Connect(ctx, cfg.Database)
-	if err != nil {
-		log.Fatalf("database: %v", err)
-	}
-	defer db.Close()
+	registry := console.New(programName(), os.Stdout)
+	registry.Add(serveCommand())
 
-	// Repositories: one per domain, all over the same pool.
-	healthRepository := postgres.NewHealthRepository(db)
-	userRepository := postgres.NewUserRepository(db)
-	loginRepository := postgres.NewLoginRepository(db)
+	// Built at most once, and only for commands that declared they need it, so
+	// `help` and `version` keep working without a valid configuration.
+	var instance *app.App
+	defer func() {
+		if instance != nil {
+			instance.Close()
+		}
+	}()
 
-	cookieSecure := cfg.Auth.CookieSecure || cfg.IsProduction()
-	userSessions := usersession.NewManager(
-		db,
-		cfg.Auth.SessionCookieName,
-		cfg.Auth.SessionTTL,
-		cookieSecure,
-	)
-
-	objectStorage := newObjectStorage(ctx, cfg)
-
-	// Services: domain behaviour over the repositories above.
-	userService := usersvc.NewService(userRepository)
-	loginService := loginsvc.NewService(loginRepository, userService, nil, loginsvc.Config{
-		AppURL:            cfg.AppURL,
-		AccessTokenSecret: cfg.Auth.API.AccessTokenSecret,
-		AccessTokenTTL:    cfg.Auth.API.AccessTokenTTL,
-		RefreshTokenTTL:   cfg.Auth.API.RefreshTokenTTL,
-		Google: loginsvc.OAuthProviderConfig{
-			ClientID:     cfg.Auth.Social.Google.ClientID,
-			ClientSecret: cfg.Auth.Social.Google.ClientSecret,
-		},
-		GitHub: loginsvc.OAuthProviderConfig{
-			ClientID:     cfg.Auth.Social.GitHub.ClientID,
-			ClientSecret: cfg.Auth.Social.GitHub.ClientSecret,
-		},
-	})
-	if !loginService.APITokensConfigured() {
-		log.Printf("auth: api tokens disabled: API_ACCESS_TOKEN_SECRET is not set")
+	appFunc := func(context.Context) (*app.App, error) {
+		if instance != nil {
+			return instance, nil
+		}
+		cfg, err := config.Load()
+		if err != nil {
+			return nil, fmt.Errorf("config: %w", err)
+		}
+		instance = app.New(cfg)
+		return instance, nil
 	}
 
-	services := server.Services{
-		Health:  healthsvc.NewService(healthRepository),
-		Users:   userService,
-		Login:   loginService,
-		Storage: objectStorage,
-	}
-
-	r := server.NewRouter(cfg, userSessions, services)
-	srv := server.New(cfg, r)
-
-	log.Printf("Listening on %s", listenURL(cfg.HTTPAddr))
-	if err := srv.Start(ctx); err != nil {
-		log.Fatalf("server: %v", err)
+	err := registry.Run(ctx, appFunc, os.Args[1:])
+	switch {
+	case err == nil:
+		return exitOK
+	case console.IsUsageError(err):
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return exitUsage
+	default:
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return exitFailure
 	}
 }
 
-// newObjectStorage builds the configured object store. A driver that cannot
-// start degrades to a disabled store so the rest of the application still
-// boots; only the features that upload files stop working.
-func newObjectStorage(ctx context.Context, cfg config.Config) storage.Service {
-	switch cfg.Storage.Driver {
-	case config.StorageDriverLocal:
-		local, err := storage.NewLocalService(storage.LocalConfig{
-			RootDir:       cfg.Storage.LocalDir,
-			PublicBaseURL: strings.TrimRight(cfg.AppURL, "/") + cfg.Storage.LocalPublicPath,
-		})
-		if err != nil {
-			log.Printf("storage: disabled: %v", err)
-			return storage.NewDisabledService(err.Error())
-		}
-		log.Printf("storage: configured driver=local root=%s", cfg.Storage.LocalDir)
-		return local
+// serveCommand starts the HTTP server and blocks until the context is
+// cancelled, which the signal handler does on SIGINT or SIGTERM.
+func serveCommand() console.Command {
+	return console.Command{
+		Name:     "serve",
+		Group:    console.GroupServing,
+		Summary:  "Start the HTTP server",
+		NeedsApp: true,
+		Setup: func(fs *flag.FlagSet) console.RunFunc {
+			addr := fs.String("addr", "", "listen address, overriding HTTP_ADDR")
 
-	case config.StorageDriverR2:
-		r2, err := storage.NewR2Service(ctx, storage.R2Config{
-			Endpoint:        cfg.R2.Endpoint,
-			Region:          cfg.R2.Region,
-			AccessKeyID:     cfg.R2.AccessKeyID,
-			SecretAccessKey: cfg.R2.SecretAccessKey,
-			Bucket:          cfg.R2.Bucket,
-			PublicBaseURL:   cfg.R2.PublicBaseURL,
-		})
-		if err != nil {
-			log.Printf("storage: disabled: %v", err)
-			return storage.NewDisabledService(err.Error())
-		}
-		log.Printf("storage: configured driver=r2 bucket=%s", cfg.R2.Bucket)
-		return r2
+			return func(ctx context.Context, a *app.App, out io.Writer) error {
+				cfg := a.Config()
+				if strings.TrimSpace(*addr) != "" {
+					cfg.HTTPAddr = strings.TrimSpace(*addr)
+				}
 
-	default:
-		log.Printf("storage: disabled: unknown driver %q", cfg.Storage.Driver)
-		return storage.NewDisabledService("unknown storage driver " + cfg.Storage.Driver)
+				services, err := a.Services(ctx)
+				if err != nil {
+					return err
+				}
+				sessions, err := a.Sessions(ctx)
+				if err != nil {
+					return err
+				}
+
+				srv := server.New(cfg, server.NewRouter(cfg, sessions, services))
+				fmt.Fprintf(out, "listening on %s\n", listenURL(cfg.HTTPAddr))
+				return srv.Start(ctx)
+			}
+		},
 	}
+}
+
+func programName() string {
+	if len(os.Args) == 0 || strings.TrimSpace(os.Args[0]) == "" {
+		return "app"
+	}
+	return filepath.Base(os.Args[0])
 }
 
 func listenURL(addr string) string {
