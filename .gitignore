@@ -3,6 +3,8 @@
 .gocache
 node_modules/
 tmp/
+# local object storage root (LOCAL_STORAGE_DIR)
+media/
 !cmd/app/
 !cmd/app/main.go
 !cmd/cli/
