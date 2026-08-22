@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadStorageDefaults(t *testing.T) {
@@ -102,4 +103,98 @@ func setBaseEnv(t *testing.T) {
 	t.Setenv("R2_SECRET_ACCESS_KEY", "")
 	t.Setenv("R2_BUCKET", "")
 	t.Setenv("R2_PUBLIC_BASE_URL", "")
+}
+
+func TestSettingProjectsRenderValues(t *testing.T) {
+	cfg := Config{AppName: "Go Starter", AppURL: "https://app.example.com", GoogleTagID: "G-ABC"}
+
+	setting := cfg.Setting()
+	if setting.AppName != cfg.AppName || setting.AppURL != cfg.AppURL || setting.GoogleTagID != cfg.GoogleTagID {
+		t.Fatalf("unexpected setting: %+v", setting)
+	}
+}
+
+func TestIsProduction(t *testing.T) {
+	cases := []struct {
+		appEnv string
+		want   bool
+	}{
+		{"production", true},
+		{"PRODUCTION", true},
+		{" production ", true},
+		{"development", false},
+		{"test", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := (Config{AppEnv: tc.appEnv}).IsProduction(); got != tc.want {
+			t.Fatalf("IsProduction(%q) = %v, want %v", tc.appEnv, got, tc.want)
+		}
+	}
+}
+
+func TestParseDuration(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"30m", 30 * time.Minute, false},
+		{"1h30m", 90 * time.Minute, false},
+		{"45", 45 * time.Second, false},
+		{" 45 ", 45 * time.Second, false},
+		{"", 0, true},
+		{"nope", 0, true},
+	}
+	for _, tc := range cases {
+		got, err := parseDuration(tc.in)
+		if (err != nil) != tc.wantErr {
+			t.Fatalf("parseDuration(%q) error = %v, wantErr %v", tc.in, err, tc.wantErr)
+		}
+		if err == nil && got != tc.want {
+			t.Fatalf("parseDuration(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestLoadRejectsInvalidRateLimits(t *testing.T) {
+	cases := []struct {
+		key   string
+		value string
+	}{
+		{"RATE_LIMIT_API_LOGIN", "0"},
+		{"RATE_LIMIT_API_LOGIN", "-1"},
+		{"RATE_LIMIT_API_REFRESH", "nope"},
+		{"RATE_LIMIT_WEB_OAUTH", "1.5"},
+		{"RATE_LIMIT_WINDOW", "nope"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key+"="+tc.value, func(t *testing.T) {
+			setBaseEnv(t)
+			t.Setenv(tc.key, tc.value)
+
+			if _, err := Load(); err == nil {
+				t.Fatalf("expected %s=%q to be rejected", tc.key, tc.value)
+			}
+		})
+	}
+}
+
+func TestLoadAcceptsRateLimitOverrides(t *testing.T) {
+	setBaseEnv(t)
+	t.Setenv("RATE_LIMIT_API_LOGIN", "5")
+	t.Setenv("RATE_LIMIT_API_REFRESH", "50")
+	t.Setenv("RATE_LIMIT_WEB_OAUTH", "7")
+	t.Setenv("RATE_LIMIT_WINDOW", "90s")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.RateLimit.APILogin != 5 || cfg.RateLimit.APIRefresh != 50 || cfg.RateLimit.WebOAuth != 7 {
+		t.Fatalf("unexpected rate limits: %+v", cfg.RateLimit)
+	}
+	if cfg.RateLimit.Window != 90*time.Second {
+		t.Fatalf("unexpected window: %v", cfg.RateLimit.Window)
+	}
 }
