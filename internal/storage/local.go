@@ -28,9 +28,9 @@ func NewLocalService(cfg LocalConfig) (Service, error) {
 	if rootDir == "" {
 		return nil, fmt.Errorf("local storage root dir is required")
 	}
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create local storage dir: %w", err)
-	}
+	// The root is created on first write rather than here. Construction stays
+	// free of side effects, so a console command that builds the services but
+	// never stores a file does not leave a directory behind.
 	return &localService{
 		rootDir:       rootDir,
 		publicBaseURL: strings.TrimRight(strings.TrimSpace(cfg.PublicBaseURL), "/"),
