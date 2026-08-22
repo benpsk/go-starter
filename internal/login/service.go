@@ -40,6 +40,9 @@ type Service interface {
 	RevokeRefreshToken(ctx context.Context, refreshToken string, now time.Time) error
 	// ParseAccessToken validates a bearer token and returns its claims.
 	ParseAccessToken(token string) (AccessTokenClaims, error)
+	// PruneRefreshTokens removes refresh tokens that expired or were revoked
+	// more than olderThan ago, and reports how many were removed.
+	PruneRefreshTokens(ctx context.Context, olderThan time.Duration, now time.Time) (int64, error)
 }
 
 // Repository abstracts persistence for API refresh tokens.
@@ -48,6 +51,7 @@ type Repository interface {
 	RotateRefreshToken(ctx context.Context, currentHash string, next RefreshToken, now time.Time) (RotationResult, error)
 	RevokeRefreshTokenByHash(ctx context.Context, tokenHash string, now time.Time) error
 	RevokeRefreshTokenFamily(ctx context.Context, familyID string, now time.Time) error
+	DeleteRefreshTokensBefore(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
 // OAuthProviderConfig holds one provider's client credentials.

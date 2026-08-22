@@ -18,6 +18,7 @@ type tokenRepoStub struct {
 	tokens        map[string]RefreshToken
 	familyRevoked []string
 	revoked       []string
+	pruneCutoff   time.Time
 	nextID        int64
 }
 
@@ -72,6 +73,20 @@ func (r *tokenRepoStub) RevokeRefreshTokenByHash(_ context.Context, tokenHash st
 func (r *tokenRepoStub) RevokeRefreshTokenFamily(_ context.Context, familyID string, _ time.Time) error {
 	r.familyRevoked = append(r.familyRevoked, familyID)
 	return nil
+}
+
+func (r *tokenRepoStub) DeleteRefreshTokensBefore(_ context.Context, cutoff time.Time) (int64, error) {
+	var removed int64
+	for hash, token := range r.tokens {
+		expired := token.ExpiresAt.Before(cutoff)
+		revoked := token.RevokedAt != nil && token.RevokedAt.Before(cutoff)
+		if expired || revoked {
+			delete(r.tokens, hash)
+			removed++
+		}
+	}
+	r.pruneCutoff = cutoff
+	return removed, nil
 }
 
 // verifierStub returns a fixed profile instead of calling a provider.

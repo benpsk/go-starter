@@ -227,3 +227,60 @@ func TestBearerTokenFromRequest(t *testing.T) {
 
 // compile-time assertion that the stub satisfies the domain interface
 var _ users.Service = (*userServiceStub)(nil)
+
+func TestPruneRefreshTokens(t *testing.T) {
+	svc, repo := newTestService(t, testConfig(), &verifierStub{}, &userServiceStub{})
+	now := time.Now()
+
+	live, err := svc.IssueTokenPair(context.Background(), 1, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	stale, err := svc.IssueTokenPair(context.Background(), 2, now.Add(-90*24*time.Hour))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	removed, err := svc.PruneRefreshTokens(context.Background(), 30*24*time.Hour, now)
+	if err != nil {
+		t.Fatalf("PruneRefreshTokens failed: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("expected 1 token removed, got %d", removed)
+	}
+	if _, ok := repo.tokens[HashToken(stale.RefreshToken)]; ok {
+		t.Fatalf("expected the stale token to be gone")
+	}
+	if _, ok := repo.tokens[HashToken(live.RefreshToken)]; !ok {
+		t.Fatalf("expected the live token to survive")
+	}
+	if want := now.Add(-30 * 24 * time.Hour); !repo.pruneCutoff.Equal(want) {
+		t.Fatalf("cutoff = %v, want %v", repo.pruneCutoff, want)
+	}
+}
+
+func TestPruneRefreshTokensRejectsANegativeGrace(t *testing.T) {
+	svc, _ := newTestService(t, testConfig(), &verifierStub{}, &userServiceStub{})
+
+	if _, err := svc.PruneRefreshTokens(context.Background(), -time.Hour, time.Now()); statusOf(t, err) != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %v", err)
+	}
+}
+
+func TestPruneRefreshTokensAllowsAZeroGrace(t *testing.T) {
+	svc, _ := newTestService(t, testConfig(), &verifierStub{}, &userServiceStub{})
+	now := time.Now()
+
+	if _, err := svc.IssueTokenPair(context.Background(), 1, now); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// A zero grace means "everything already expired or revoked", which must
+	// not touch a live token.
+	removed, err := svc.PruneRefreshTokens(context.Background(), 0, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if removed != 0 {
+		t.Fatalf("expected no live token to be removed, got %d", removed)
+	}
+}

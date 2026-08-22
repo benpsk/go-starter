@@ -250,3 +250,115 @@ func TestLoginRepositoryRevoke(t *testing.T) {
 
 // compile-time assertion that the repository satisfies the domain contract
 var _ loginsvc.Repository = (*postgres.LoginRepository)(nil)
+
+func TestLoginRepositoryDeleteRefreshTokensBefore(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx, done := testutil.WithTx(t, pool)
+	defer done()
+
+	owner, err := postgres.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
+		Provider:       "google",
+		ProviderUserID: "g-token-prune",
+		Email:          "prune@example.com",
+	})
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	repo := postgres.NewLoginRepository(pool)
+	now := time.Now().UTC()
+
+	seed := func(name string, expiresAt time.Time, revokedAt *time.Time) {
+		t.Helper()
+		if err := repo.CreateRefreshToken(ctx, loginsvc.RefreshToken{
+			UserID:    owner.ID,
+			FamilyID:  "family-prune",
+			TokenHash: loginsvc.HashToken(name),
+			ExpiresAt: expiresAt,
+		}); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+		if revokedAt != nil {
+			if err := repo.RevokeRefreshTokenByHash(ctx, loginsvc.HashToken(name), *revokedAt); err != nil {
+				t.Fatalf("revoke %s: %v", name, err)
+			}
+		}
+	}
+
+	longAgo := now.Add(-48 * time.Hour)
+	seed("stale-expired", longAgo, nil)
+	seed("stale-revoked", now.Add(time.Hour), &longAgo)
+	seed("recently-revoked", now.Add(time.Hour), &now)
+	seed("live", now.Add(time.Hour), nil)
+
+	cutoff := now.Add(-24 * time.Hour)
+	removed, err := repo.DeleteRefreshTokensBefore(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("DeleteRefreshTokensBefore failed: %v", err)
+	}
+	if removed != 2 {
+		t.Fatalf("expected 2 rows removed, got %d", removed)
+	}
+
+	for _, name := range []string{"stale-expired", "stale-revoked"} {
+		if _, err := repo.FindRefreshTokenByHash(ctx, loginsvc.HashToken(name)); err == nil {
+			t.Fatalf("expected %s to be gone", name)
+		}
+	}
+	for _, name := range []string{"recently-revoked", "live"} {
+		if _, err := repo.FindRefreshTokenByHash(ctx, loginsvc.HashToken(name)); err != nil {
+			t.Fatalf("expected %s to survive the grace period: %v", name, err)
+		}
+	}
+}
+
+func TestLoginRepositoryPruneKeepsReuseDetectionIntact(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx, done := testutil.WithTx(t, pool)
+	defer done()
+
+	owner, err := postgres.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
+		Provider:       "google",
+		ProviderUserID: "g-token-prune-2",
+		Email:          "prune2@example.com",
+	})
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	repo := postgres.NewLoginRepository(pool)
+	now := time.Now().UTC()
+
+	if err := repo.CreateRefreshToken(ctx, loginsvc.RefreshToken{
+		UserID:    owner.ID,
+		FamilyID:  "family-prune-2",
+		TokenHash: loginsvc.HashToken("first"),
+		ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateRefreshToken failed: %v", err)
+	}
+	if _, err := repo.RotateRefreshToken(ctx, loginsvc.HashToken("first"), loginsvc.RefreshToken{
+		TokenHash: loginsvc.HashToken("second"),
+		ExpiresAt: now.Add(time.Hour),
+	}, now); err != nil {
+		t.Fatalf("rotation failed: %v", err)
+	}
+
+	// Pruning the rotated predecessor clears the successor's back-pointer via
+	// the self-referencing foreign key. Reuse detection must still work,
+	// because revoked_at is set alongside that pointer.
+	if _, err := repo.DeleteRefreshTokensBefore(ctx, now.Add(time.Minute)); err != nil {
+		t.Fatalf("prune failed: %v", err)
+	}
+
+	result, err := repo.RotateRefreshToken(ctx, loginsvc.HashToken("first"), loginsvc.RefreshToken{
+		TokenHash: loginsvc.HashToken("third"),
+		ExpiresAt: now.Add(time.Hour),
+	}, now)
+	if err != nil {
+		t.Fatalf("replay rotation failed: %v", err)
+	}
+	if result.Authorized {
+		t.Fatalf("a pruned predecessor must not become usable again")
+	}
+}

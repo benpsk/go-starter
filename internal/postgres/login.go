@@ -169,3 +169,21 @@ func (r *LoginRepository) FindRefreshTokenByHash(ctx context.Context, tokenHash 
 	}
 	return out, nil
 }
+
+// DeleteRefreshTokensBefore removes tokens that expired, or were revoked,
+// before the cutoff. It returns how many rows were removed.
+//
+// Deleting a rotated predecessor is safe: replaced_by_token_id is set at the
+// same moment as revoked_at, so reuse detection still catches a replay through
+// the revoked_at check even after the pointer is gone.
+func (r *LoginRepository) DeleteRefreshTokensBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	tag, err := QuerierFromContext(ctx, r.db).Exec(ctx, `
+        delete from api_refresh_tokens
+        where expires_at < $1
+           or (revoked_at is not null and revoked_at < $1)
+    `, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired api refresh tokens: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}

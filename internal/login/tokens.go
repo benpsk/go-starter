@@ -151,6 +151,20 @@ func (s *service) RevokeRefreshToken(ctx context.Context, refreshToken string, n
 	return nil
 }
 
+// PruneRefreshTokens deletes refresh tokens whose usefulness has lapsed. The
+// grace period keeps recently revoked rows around long enough to stay visible
+// while an incident is being investigated.
+func (s *service) PruneRefreshTokens(ctx context.Context, olderThan time.Duration, now time.Time) (int64, error) {
+	if olderThan < 0 {
+		return 0, apperror.BadRequest("grace period must not be negative")
+	}
+	removed, err := s.repo.DeleteRefreshTokensBefore(ctx, now.Add(-olderThan))
+	if err != nil {
+		return 0, apperror.Internal("failed to prune refresh tokens", err)
+	}
+	return removed, nil
+}
+
 // ParseAccessToken validates a bearer token's signature, audience, and expiry.
 func (s *service) ParseAccessToken(token string) (AccessTokenClaims, error) {
 	token = strings.TrimSpace(token)

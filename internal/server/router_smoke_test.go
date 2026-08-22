@@ -64,6 +64,10 @@ func (loginRepoStub) RevokeRefreshTokenByHash(context.Context, string, time.Time
 
 func (loginRepoStub) RevokeRefreshTokenFamily(context.Context, string, time.Time) error { return nil }
 
+func (loginRepoStub) DeleteRefreshTokensBefore(context.Context, time.Time) (int64, error) {
+	return 0, nil
+}
+
 func testRouter(t *testing.T, healthErr error) http.Handler {
 	t.Helper()
 
