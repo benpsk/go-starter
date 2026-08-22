@@ -1,50 +1,63 @@
 package api
 
 import (
-	"context"
 	"net/http"
-	"time"
 
-	"github.com/benpsk/go-starter/internal/auth"
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/benpsk/go-starter/internal/apperror"
+	"github.com/benpsk/go-starter/internal/appsvc"
+	"github.com/benpsk/go-starter/internal/config"
+	"github.com/benpsk/go-starter/internal/ratelimit"
 )
 
-type Handler struct {
-	db   *pgxpool.Pool
-	auth *auth.Service
-}
-
-func NewHandler(db *pgxpool.Pool, authService *auth.Service) Handler {
-	return Handler{db: db, auth: authService}
-}
-
-func Routes(h Handler, limiter *auth.RateLimiter) chi.Router {
-	r := chi.NewRouter()
-	r.Route("/auth", func(r chi.Router) {
-		r.With(limiter.LimitByIP("api_auth_login")).Post("/login/{provider}", h.login)
-		r.With(limiter.LimitByIP("api_auth_refresh")).Post("/refresh", h.refresh)
-		r.Post("/logout", h.logout)
-		r.With(h.requireAPIAuth).Get("/me", h.me)
-	})
-	r.Get("/health", h.Health)
-	return r
-}
-
-func (h Handler) Health(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-	defer cancel()
-
-	payload := map[string]any{"status": "ok", "database": "up"}
-	status := http.StatusOK
-
-	if h.db != nil {
-		if err := h.db.Ping(ctx); err != nil {
-			payload["status"] = "degraded"
-			payload["database"] = err.Error()
-			status = http.StatusServiceUnavailable
+// Mount wires the JSON API routes onto the provided router.
+//
+// Handlers are constructed here from the services in svc. Middleware that only
+// the API needs (bearer auth, JSON content type, API rate limits) is applied
+// here rather than globally.
+func Mount(r chi.Router, cfg config.Config, svc appsvc.Services) {
+	limitConfig := func(limit int) ratelimit.Config {
+		return ratelimit.Config{
+			Limit:         limit,
+			Window:        cfg.RateLimit.Window,
+			SkipLocalhost: !cfg.IsProduction(),
 		}
 	}
+	onLimit := func(w http.ResponseWriter, _ *http.Request) {
+		Error(w, apperror.TooManyRequests("rate limit exceeded"))
+	}
+	loginRateLimit := ratelimit.NewFixedWindow("api_auth_login", limitConfig(cfg.RateLimit.APILogin), onLimit)
+	refreshRateLimit := ratelimit.NewFixedWindow("api_auth_refresh", limitConfig(cfg.RateLimit.APIRefresh), onLimit)
 
-	writeJSON(w, status, payload)
+	login := NewLoginAPIHandler(svc.Login, svc.Users, LoginAPIConfig{
+		RefreshCookieName: cfg.Auth.API.RefreshCookieName,
+		CookieSecure:      cfg.Auth.CookieSecure,
+	})
+
+	r.Route("/api", func(apiRouter chi.Router) {
+		apiRouter.Use(middleware.AllowContentType("application/json"))
+		apiRouter.NotFound(notFound)
+		apiRouter.MethodNotAllowed(methodNotAllowed)
+
+		apiRouter.Route("/auth", func(auth chi.Router) {
+			auth.With(loginRateLimit).Post("/login/{provider}", login.Login)
+			auth.With(refreshRateLimit).Post("/refresh", login.Refresh)
+			auth.Post("/logout", login.Logout)
+
+			auth.Group(func(protected chi.Router) {
+				protected.Use(Authenticator(svc.Login))
+				protected.Get("/me", login.Me)
+			})
+		})
+	})
+}
+
+func notFound(w http.ResponseWriter, _ *http.Request) {
+	Error(w, apperror.NotFound("endpoint not found"))
+}
+
+func methodNotAllowed(w http.ResponseWriter, _ *http.Request) {
+	Error(w, apperror.New(http.StatusMethodNotAllowed, "method not allowed", nil))
 }

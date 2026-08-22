@@ -13,6 +13,8 @@ import (
 	"time"
 
 	dbembed "github.com/benpsk/go-starter/db"
+	_ "github.com/joho/godotenv/autoload"
+
 	"github.com/benpsk/go-starter/internal/config"
 	"github.com/benpsk/go-starter/internal/postgres"
 )

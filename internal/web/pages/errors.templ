@@ -2,14 +2,8 @@ package pages
 
 import "github.com/benpsk/go-starter/internal/web/components"
 
-templ NotFoundPage(appName string, appURL string, googleTagID string, auth components.HeaderAuthData) {
-	@components.Layout(appName, appURL, googleTagID, auth, components.PageMeta{
-		Title:       "Page Not Found",
-		Description: "The requested page could not be found.",
-		Keywords:    "404,not found",
-		Path:        "/404",
-		Type:        "website",
-	}, NotFoundContent())
+templ NotFoundPage(props components.PageProps) {
+	@components.Layout(props, NotFoundContent())
 }
 
 templ NotFoundContent() {
@@ -26,14 +20,8 @@ templ NotFoundContent() {
 	</section>
 }
 
-templ MethodNotAllowedPage(appName string, appURL string, googleTagID string, auth components.HeaderAuthData) {
-	@components.Layout(appName, appURL, googleTagID, auth, components.PageMeta{
-		Title:       "Method Not Allowed",
-		Description: "The HTTP method is not allowed for this route.",
-		Keywords:    "405,method not allowed",
-		Path:        "/405",
-		Type:        "website",
-	}, MethodNotAllowedContent())
+templ MethodNotAllowedPage(props components.PageProps) {
+	@components.Layout(props, MethodNotAllowedContent())
 }
 
 templ MethodNotAllowedContent() {
@@ -44,7 +32,7 @@ templ MethodNotAllowedContent() {
 			<p class="mt-3 text-base-content/70">This route exists, but the HTTP method you used is not supported.</p>
 			<div class="mt-6 flex justify-center gap-2">
 				<a href="/" class="btn btn-primary">Back home</a>
-				<a href="/healthz" hx-boost="false" class="btn btn-ghost">Health JSON</a>
+				<a href="/readyz" hx-boost="false" class="btn btn-ghost">Readiness JSON</a>
 			</div>
 		</div>
 	</section>

@@ -2,14 +2,8 @@ package pages
 
 import "github.com/benpsk/go-starter/internal/web/components"
 
-templ HomePage(appName string, appURL string, googleTagID string, auth components.HeaderAuthData) {
-	@components.Layout(appName, appURL, googleTagID, auth, components.PageMeta{
-		Title:       appName,
-		Description: "Minimal Go starter with chi, pgx, templ, Tailwind, DaisyUI, htmx, and Chart.js.",
-		Keywords:    "go starter,chi,pgx,templ,tailwind,daisyui,htmx,chartjs",
-		Path:        "/",
-		Type:        "website",
-	}, HomeContent())
+templ HomePage(props components.PageProps) {
+	@components.Layout(props, HomeContent())
 }
 
 templ HomeContent() {
@@ -19,11 +13,12 @@ templ HomeContent() {
 				<p class="badge badge-outline badge-primary">Reusable stack starter</p>
 				<h1 class="mt-4 text-4xl font-black tracking-tight sm:text-5xl">Go Starter</h1>
 				<p class="mt-4 max-w-2xl text-base-content/70">
-					A minimal template extracted from a production app structure. It includes routing, database wiring, migrations, templ pages, htmx navigation, and asset tooling.
+					A minimal template extracted from a production app structure. Domain services, a
+					layered postgres repository, templ pages, htmx navigation, and asset tooling.
 				</p>
 				<div class="mt-6 flex flex-wrap gap-2">
 					<a class="btn btn-primary" href="/about">Open About</a>
-					<a class="btn btn-outline" href="/healthz" hx-boost="false">Health JSON</a>
+					<a class="btn btn-outline" href="/readyz" hx-boost="false">Readiness JSON</a>
 				</div>
 				<div class="mt-6 grid gap-3 sm:grid-cols-2">
 					<div class="rounded-2xl border border-base-300 bg-base-200/60 p-4">

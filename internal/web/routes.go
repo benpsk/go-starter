@@ -3,43 +3,63 @@ package web
 import (
 	"net/http"
 
-	"github.com/benpsk/go-starter/internal/auth"
-	"github.com/benpsk/go-starter/internal/config"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/benpsk/go-starter/internal/appsvc"
+	usersession "github.com/benpsk/go-starter/internal/auth/user"
+	"github.com/benpsk/go-starter/internal/config"
+	"github.com/benpsk/go-starter/internal/ratelimit"
 )
 
-type Handler struct {
-	auth        *auth.Service
-	appName     string
-	appURL      string
-	googleTagID string
-}
+// Mount wires the server-rendered browser routes onto the provided router.
+//
+// Handlers are constructed here from the services in svc. Middleware that only
+// browsers need (CSRF, cookie sessions, the OAuth start rate limit) is applied
+// here rather than globally, so it never runs for the JSON API or static files.
+func Mount(r chi.Router, cfg config.Config, userSessions *usersession.Manager, svc appsvc.Services) {
+	setting := cfg.Setting()
 
-func NewHandler(cfg config.Config, authService *auth.Service) Handler {
-	return Handler{
-		auth:        authService,
-		appName:     cfg.AppName,
-		appURL:      cfg.AppURL,
-		googleTagID: cfg.GoogleTagID,
+	csrf := NewCSRFMiddleware(CSRFConfig{Secure: cfg.Auth.CookieSecure})
+	session := SessionMiddleware{
+		Sessions:  userSessions,
+		LoginPath: loginPath,
+		HomePath:  defaultPostLoginPath,
 	}
-}
+	oauthRateLimit := ratelimit.NewFixedWindow("web_oauth_start", ratelimit.Config{
+		Limit:         cfg.RateLimit.WebOAuth,
+		Window:        cfg.RateLimit.Window,
+		SkipLocalhost: !cfg.IsProduction(),
+	}, func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+	})
 
-func Routes(h Handler, limiter *auth.RateLimiter) chi.Router {
-	r := chi.NewRouter()
-	r.Get("/", h.homePage)
-	r.Get("/about", h.aboutPage)
-	r.With(h.auth.RequireGuest).Get("/auth/login", h.loginPage)
-	r.With(limiter.LimitByIP("web_oauth_start"), h.auth.RequireGuest).Post("/auth/login/{provider}", h.startSocialLogin)
-	r.With(h.auth.RequireGuest).Get("/auth/callback/{provider}", h.oauthCallback)
-	r.With(h.auth.RequireAuth).Get("/account", h.accountPage)
-	r.With(h.auth.RequireAuth).Post("/auth/logout", h.logout)
-	return r
-}
+	page := NewPageHandler(setting)
+	login := NewUserLoginHandler(svc.Login, userSessions, setting)
+	account := NewAccountHandler(svc.Users, setting, loginPath)
 
-func (h Handler) NotFound(w http.ResponseWriter, r *http.Request) {
-	h.notFoundPage(w, r)
-}
+	// Fallbacks live on the root router so a miss anywhere renders the
+	// branded error page rather than chi's plain text.
+	r.NotFound(page.NotFound)
+	r.MethodNotAllowed(page.MethodNotAllowed)
 
-func (h Handler) MethodNotAllowed(w http.ResponseWriter, r *http.Request) {
-	h.methodNotAllowedPage(w, r)
+	r.Group(func(browser chi.Router) {
+		browser.Use(csrf)
+		browser.Use(session.WithUser)
+
+		browser.Get("/", page.Home)
+		browser.Get("/about", page.About)
+
+		browser.Group(func(guest chi.Router) {
+			guest.Use(session.RequireGuest)
+			guest.Get(loginPath, login.Show)
+			guest.With(oauthRateLimit).Post("/auth/login/{provider}", login.Start)
+			guest.Get("/auth/callback/{provider}", login.Callback)
+		})
+
+		browser.Group(func(protected chi.Router) {
+			protected.Use(session.Require)
+			protected.Get("/account", account.Show)
+			protected.Post("/auth/logout", login.Logout)
+		})
+	})
 }

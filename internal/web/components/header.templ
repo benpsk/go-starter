@@ -1,6 +1,6 @@
 package components
 
-templ Header(appName string, auth HeaderAuthData) {
+templ Header(appName string, auth HeaderAuthProps) {
 	<header class="pt-3 sm:pt-5">
 		<div class="navbar rounded-2xl border border-base-300/60 bg-base-100/85 px-3 shadow-lg backdrop-blur sm:px-5">
 			<div class="navbar-start">
@@ -10,7 +10,7 @@ templ Header(appName string, auth HeaderAuthData) {
 				<ul class="menu menu-horizontal gap-1 px-1">
 					<li><a href="/" data-nav-link class="btn btn-ghost btn-sm">Home</a></li>
 					<li><a href="/about" data-nav-link class="btn btn-ghost btn-sm">About</a></li>
-					<li><a href="/healthz" hx-boost="false" class="btn btn-ghost btn-sm">Health JSON</a></li>
+					<li><a href="/readyz" hx-boost="false" class="btn btn-ghost btn-sm">Readiness</a></li>
 				</ul>
 			</div>
 			<div class="navbar-end gap-2">

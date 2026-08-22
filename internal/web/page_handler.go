@@ -3,68 +3,78 @@ package web
 import (
 	"net/http"
 
-	"github.com/a-h/templ"
-	"github.com/benpsk/go-starter/internal/auth"
+	"github.com/benpsk/go-starter/internal/config"
 	"github.com/benpsk/go-starter/internal/web/components"
 	"github.com/benpsk/go-starter/internal/web/pages"
 )
 
-func (h Handler) homePage(w http.ResponseWriter, r *http.Request) {
-	if auth.IsHtmx(r) {
-		h.renderPage(w, r, components.Content(h.appName, pages.HomeContent()))
+// PageHandler renders the static marketing and error pages.
+type PageHandler struct {
+	setting config.Setting
+}
+
+// NewPageHandler wires the render settings into a handler instance.
+func NewPageHandler(setting config.Setting) PageHandler {
+	return PageHandler{setting: setting}
+}
+
+// Home renders the landing page.
+func (h PageHandler) Home(w http.ResponseWriter, r *http.Request) {
+	props := pageProps(h.setting, r, components.Meta{
+		Title:       h.setting.AppName,
+		Description: "Minimal Go starter with chi, pgx, templ, Tailwind, DaisyUI, htmx, and Chart.js.",
+		Keywords:    "go starter,chi,pgx,templ,tailwind,daisyui,htmx,chartjs",
+		Path:        "/",
+	})
+	if IsHtmx(r) {
+		render(w, r, components.Content(props.FullTitle(), pages.HomeContent()))
 		return
 	}
-	h.renderPage(w, r, pages.HomePage(h.appName, h.appURL, h.googleTagID, h.headerAuthData(r)))
+	render(w, r, pages.HomePage(props))
 }
 
-func (h Handler) aboutPage(w http.ResponseWriter, r *http.Request) {
-	if auth.IsHtmx(r) {
-		h.renderPage(w, r, components.Content("About | "+h.appName, pages.AboutContent()))
+// About renders the about page.
+func (h PageHandler) About(w http.ResponseWriter, r *http.Request) {
+	props := pageProps(h.setting, r, components.Meta{
+		Title:       "About",
+		Description: "About the Go Starter template and the structure it follows.",
+		Keywords:    "go starter about",
+		Path:        "/about",
+		Type:        "article",
+	})
+	if IsHtmx(r) {
+		render(w, r, components.Content(props.FullTitle(), pages.AboutContent()))
 		return
 	}
-	h.renderPage(w, r, pages.AboutPage(h.appName, h.appURL, h.googleTagID, h.headerAuthData(r)))
+	render(w, r, pages.AboutPage(props))
 }
 
-func (h Handler) notFoundPage(w http.ResponseWriter, r *http.Request) {
-	if auth.IsHtmx(r) {
-		h.renderPageStatus(w, r, http.StatusNotFound, components.Content("Not Found | "+h.appName, pages.NotFoundContent()))
+// NotFound renders the 404 page.
+func (h PageHandler) NotFound(w http.ResponseWriter, r *http.Request) {
+	props := pageProps(h.setting, r, components.Meta{
+		Title:       "Page Not Found",
+		Description: "The requested page could not be found.",
+		Keywords:    "404,not found",
+		Path:        "/404",
+	})
+	if IsHtmx(r) {
+		renderStatus(w, r, http.StatusNotFound, components.Content(props.FullTitle(), pages.NotFoundContent()))
 		return
 	}
-	h.renderPageStatus(w, r, http.StatusNotFound, pages.NotFoundPage(h.appName, h.appURL, h.googleTagID, h.headerAuthData(r)))
+	renderStatus(w, r, http.StatusNotFound, pages.NotFoundPage(props))
 }
 
-func (h Handler) methodNotAllowedPage(w http.ResponseWriter, r *http.Request) {
-	if auth.IsHtmx(r) {
-		h.renderPageStatus(w, r, http.StatusMethodNotAllowed, components.Content("Method Not Allowed | "+h.appName, pages.MethodNotAllowedContent()))
+// MethodNotAllowed renders the 405 page.
+func (h PageHandler) MethodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	props := pageProps(h.setting, r, components.Meta{
+		Title:       "Method Not Allowed",
+		Description: "The HTTP method is not allowed for this route.",
+		Keywords:    "405,method not allowed",
+		Path:        "/405",
+	})
+	if IsHtmx(r) {
+		renderStatus(w, r, http.StatusMethodNotAllowed, components.Content(props.FullTitle(), pages.MethodNotAllowedContent()))
 		return
 	}
-	h.renderPageStatus(w, r, http.StatusMethodNotAllowed, pages.MethodNotAllowedPage(h.appName, h.appURL, h.googleTagID, h.headerAuthData(r)))
-}
-
-func (h Handler) renderPage(w http.ResponseWriter, r *http.Request, component templ.Component) {
-	h.renderPageStatus(w, r, http.StatusOK, component)
-}
-
-func (h Handler) renderPageStatus(w http.ResponseWriter, r *http.Request, status int, component templ.Component) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	if err := component.Render(r.Context(), w); err != nil {
-		http.Error(w, "failed to render page", http.StatusInternalServerError)
-	}
-}
-
-func (h Handler) headerAuthData(r *http.Request) components.HeaderAuthData {
-	currentUser := auth.CurrentUserFromRequest(r)
-	if currentUser == nil {
-		return components.HeaderAuthData{}
-	}
-	name := currentUser.DisplayName
-	if name == "" {
-		name = "Account"
-	}
-	return components.HeaderAuthData{
-		IsAuthenticated: true,
-		DisplayName:     name,
-		AvatarURL:       currentUser.AvatarURL,
-	}
+	renderStatus(w, r, http.StatusMethodNotAllowed, pages.MethodNotAllowedPage(props))
 }

@@ -3,7 +3,7 @@ module github.com/benpsk/go-starter
 go 1.25.5
 
 require (
-	github.com/a-h/templ v0.3.977
+	github.com/a-h/templ v0.3.1020
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.18
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.17
@@ -12,6 +12,7 @@ require (
 	github.com/go-chi/cors v1.2.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.9.2
+	github.com/joho/godotenv v1.5.1
 )
 
 require (

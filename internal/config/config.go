@@ -28,6 +28,16 @@ const (
 	defaultLocalStorageDir  = "media"
 	defaultLocalPublicPath  = "/media"
 	defaultR2Region         = "auto"
+	defaultRateLimitWindow  = time.Minute
+	defaultAPILoginLimit    = 10
+	defaultAPIRefreshLimit  = 30
+	defaultWebOAuthLimit    = 10
+)
+
+// Storage driver identifiers.
+const (
+	StorageDriverLocal = "local"
+	StorageDriverR2    = "r2"
 )
 
 type Config struct {
@@ -36,11 +46,43 @@ type Config struct {
 	AppURL          string
 	GoogleTagID     string
 	Auth            AuthConfig
+	RateLimit       RateLimitConfig
 	HTTPAddr        string
 	ShutdownTimeout time.Duration
 	Database        DatabaseConfig
 	Storage         StorageConfig
 	R2              R2Config
+}
+
+// Setting is the subset of configuration templates and view props need. It is
+// passed to the presentation layer instead of the whole Config.
+type Setting struct {
+	AppName     string
+	AppURL      string
+	GoogleTagID string
+}
+
+// Setting projects the render-time settings out of the full configuration.
+func (c Config) Setting() Setting {
+	return Setting{
+		AppName:     c.AppName,
+		AppURL:      c.AppURL,
+		GoogleTagID: c.GoogleTagID,
+	}
+}
+
+// IsProduction reports whether the app runs with production behaviour: strict
+// CORS origins, embedded assets, secure cookies, and active rate limits.
+func (c Config) IsProduction() bool {
+	return strings.EqualFold(strings.TrimSpace(c.AppEnv), "production")
+}
+
+// RateLimitConfig holds the per-endpoint request allowances.
+type RateLimitConfig struct {
+	Window     time.Duration
+	APILogin   int
+	APIRefresh int
+	WebOAuth   int
 }
 
 type StorageConfig struct {
@@ -103,6 +145,12 @@ func Load() (Config, error) {
 				RefreshTokenTTL:   defaultAPIRefreshTTL,
 				RefreshCookieName: defaultAPIRefreshCookie,
 			},
+		},
+		RateLimit: RateLimitConfig{
+			Window:     defaultRateLimitWindow,
+			APILogin:   defaultAPILoginLimit,
+			APIRefresh: defaultAPIRefreshLimit,
+			WebOAuth:   defaultWebOAuthLimit,
 		},
 		HTTPAddr:        defaultHTTPAddr,
 		ShutdownTimeout: defaultShutdownTimeout,
@@ -171,6 +219,22 @@ func Load() (Config, error) {
 	}
 	if v := strings.TrimSpace(os.Getenv("API_REFRESH_COOKIE_NAME")); v != "" {
 		cfg.Auth.API.RefreshCookieName = v
+	}
+	if err := loadInt(&cfg.RateLimit.APILogin, "RATE_LIMIT_API_LOGIN"); err != nil {
+		return Config{}, err
+	}
+	if err := loadInt(&cfg.RateLimit.APIRefresh, "RATE_LIMIT_API_REFRESH"); err != nil {
+		return Config{}, err
+	}
+	if err := loadInt(&cfg.RateLimit.WebOAuth, "RATE_LIMIT_WEB_OAUTH"); err != nil {
+		return Config{}, err
+	}
+	if v := strings.TrimSpace(os.Getenv("RATE_LIMIT_WINDOW")); v != "" {
+		d, err := parseDuration(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse RATE_LIMIT_WINDOW: %w", err)
+		}
+		cfg.RateLimit.Window = d
 	}
 	if v := strings.TrimSpace(os.Getenv("HTTP_ADDR")); v != "" {
 		cfg.HTTPAddr = v
@@ -260,11 +324,11 @@ func Load() (Config, error) {
 	cfg.R2.PublicBaseURL = strings.TrimSpace(os.Getenv("R2_PUBLIC_BASE_URL"))
 
 	switch cfg.Storage.Driver {
-	case "local":
+	case StorageDriverLocal:
 		if strings.TrimSpace(cfg.Storage.LocalDir) == "" {
 			return Config{}, errors.New("LOCAL_STORAGE_DIR must not be empty when STORAGE_DRIVER=local")
 		}
-	case "r2":
+	case StorageDriverR2:
 		missing := []string{}
 		if cfg.R2.Endpoint == "" {
 			missing = append(missing, "R2_ENDPOINT")
@@ -289,6 +353,19 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func loadInt(target *int, key string) error {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return fmt.Errorf("%s must be a positive integer", key)
+	}
+	*target = n
+	return nil
 }
 
 func parseDuration(v string) (time.Duration, error) {
