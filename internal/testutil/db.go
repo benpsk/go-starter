@@ -76,11 +76,7 @@ func prepareDB() (*pgxpool.Pool, error) {
 		pool.Close()
 		return nil, err
 	}
-	if err := postgres.EnsureTable(ctx, pool); err != nil {
-		pool.Close()
-		return nil, err
-	}
-	if err := postgres.EnsureSeedTable(ctx, pool); err != nil {
+	if err := postgres.EnsureHistoryTable(ctx, pool); err != nil {
 		pool.Close()
 		return nil, err
 	}
@@ -90,7 +86,9 @@ func prepareDB() (*pgxpool.Pool, error) {
 		pool.Close()
 		return nil, err
 	}
-	if _, err := postgres.Apply(ctx, pool, filepath.Join(root, "db", "migrations")); err != nil {
+	if _, err := postgres.Apply(ctx, pool, filepath.Join(root, "db", "migrations"), postgres.ApplyOptions{
+		Kind: postgres.KindMigration,
+	}); err != nil {
 		pool.Close()
 		return nil, err
 	}
