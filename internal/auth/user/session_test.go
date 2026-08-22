@@ -1,6 +1,7 @@
 package user_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -259,5 +260,86 @@ func TestValidateRejectsARevokedSession(t *testing.T) {
 	after.AddCookie(cookie)
 	if _, err := manager.Validate(after); err != usersession.ErrInvalidSession {
 		t.Fatalf("expected a revoked session to be rejected, got %v", err)
+	}
+}
+
+func TestPruneExpired(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx, tx, done := testutil.BeginTx(t, pool)
+	defer done()
+
+	owner, err := postgres.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
+		Provider:       "google",
+		ProviderUserID: "g-session-prune",
+		Email:          "prune-session@example.com",
+	})
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	manager := usersession.NewManager(tx, cookieName, time.Hour, false)
+	// Three live sessions, then age two of them past the grace period.
+	for i := 0; i < 3; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		if err := manager.Issue(req.Context(), rec, req, owner.ID); err != nil {
+			t.Fatalf("Issue failed: %v", err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `
+		update user_sessions
+		set expires_at = now() - interval '48 hours'
+		where id in (select id from user_sessions order by id limit 1)
+	`); err != nil {
+		t.Fatalf("age session: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		update user_sessions
+		set revoked_at = now() - interval '48 hours'
+		where id in (select id from user_sessions order by id offset 1 limit 1)
+	`); err != nil {
+		t.Fatalf("revoke session: %v", err)
+	}
+
+	removed, err := manager.PruneExpired(ctx, 24*time.Hour, time.Now())
+	if err != nil {
+		t.Fatalf("PruneExpired failed: %v", err)
+	}
+	if removed != 2 {
+		t.Fatalf("expected 2 sessions removed, got %d", removed)
+	}
+
+	var remaining int
+	if err := tx.QueryRow(ctx, `select count(*) from user_sessions`).Scan(&remaining); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	if remaining != 1 {
+		t.Fatalf("expected the live session to survive, %d remain", remaining)
+	}
+}
+
+func TestPruneExpiredRejectsANegativeGrace(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	_, tx, done := testutil.BeginTx(t, pool)
+	defer done()
+
+	manager := usersession.NewManager(tx, cookieName, time.Hour, false)
+	if _, err := manager.PruneExpired(context.Background(), -time.Hour, time.Now()); err == nil {
+		t.Fatalf("expected a negative grace period to be rejected")
+	}
+}
+
+func TestPruneExpiredOnAnEmptyTable(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx, tx, done := testutil.BeginTx(t, pool)
+	defer done()
+
+	manager := usersession.NewManager(tx, cookieName, time.Hour, false)
+	removed, err := manager.PruneExpired(ctx, time.Hour, time.Now())
+	if err != nil {
+		t.Fatalf("pruning nothing must succeed: %v", err)
+	}
+	if removed != 0 {
+		t.Fatalf("expected 0 removed, got %d", removed)
 	}
 }

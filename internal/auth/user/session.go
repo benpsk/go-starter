@@ -224,3 +224,26 @@ func requestMeta(r *http.Request) (ip string, userAgent string) {
 	}
 	return ip, strings.TrimSpace(r.UserAgent())
 }
+
+// PruneExpired deletes sessions that expired, or were revoked, more than
+// olderThan ago, and reports how many were removed. Nothing else removes these
+// rows, so without a periodic prune the table grows without bound.
+func (m *Manager) PruneExpired(ctx context.Context, olderThan time.Duration, now time.Time) (int64, error) {
+	if olderThan < 0 {
+		return 0, fmt.Errorf("prune user sessions: grace period must not be negative")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	cutoff := now.Add(-olderThan)
+	tag, err := m.db.Exec(ctx, `
+		delete from user_sessions
+		where expires_at < $1
+		   or (revoked_at is not null and revoked_at < $1)
+	`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("prune user sessions: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
