@@ -101,6 +101,11 @@ contracts with web page data unless they are intentionally shared.
 ## API Design
 
 - Keep handlers thin; delegate business logic to services under `internal/`.
+- Use `snake_case` for every JSON field name, including nested response fields,
+  pagination metadata, and validation error keys. Give every exported response
+  struct field an explicit `json:"snake_case_name"` tag instead of relying on
+  Go's default field-name encoding.
+- Follow `plans/api.md` for the response envelope and pagination contract.
 - Return errors as `*apperror.AppError` from services, and render them with
   `api.Error` / `web.Error`. Handlers do not choose status codes ad hoc.
 - Wrap success payloads with `api.Success`, which enforces the `{"data": ...}`
