@@ -1,10 +1,10 @@
 package api
 
 import (
+	"mime"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/benpsk/go-starter/internal/apperror"
 	"github.com/benpsk/go-starter/internal/appsvc"
@@ -37,7 +37,7 @@ func Mount(r chi.Router, cfg config.Config, svc appsvc.Services) {
 	})
 
 	r.Route("/api", func(apiRouter chi.Router) {
-		apiRouter.Use(middleware.AllowContentType("application/json"))
+		apiRouter.Use(requireJSONContentType)
 		apiRouter.NotFound(notFound)
 		apiRouter.MethodNotAllowed(methodNotAllowed)
 
@@ -51,6 +51,19 @@ func Mount(r chi.Router, cfg config.Config, svc appsvc.Services) {
 				protected.Get("/me", login.Me)
 			})
 		})
+	})
+}
+
+func requireJSONContentType(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil && r.ContentLength != 0 {
+			mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+			if err != nil || mediaType != "application/json" {
+				Error(w, apperror.New(http.StatusUnsupportedMediaType, "content type must be application/json", nil))
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

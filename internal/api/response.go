@@ -9,96 +9,114 @@ import (
 	"github.com/benpsk/go-starter/internal/apperror"
 )
 
-// Response wraps a list payload.
-type Response[T any] struct {
-	Data []T `json:"data"`
+// Envelope is the response shape shared by every JSON API endpoint.
+type Envelope struct {
+	Data   any                 `json:"data"`
+	Error  *ErrorDetail        `json:"error"`
+	Errors map[string][]string `json:"errors"`
 }
 
-// ResponseMessage wraps a single-object payload.
-type ResponseMessage[T any] struct {
-	Data T `json:"data"`
+// ErrorDetail describes an API error in a stable, client-readable form.
+type ErrorDetail struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
-// PageResponse wraps a paginated list payload.
-type PageResponse[T any] struct {
-	Data    []T `json:"data"`
-	Page    int `json:"page"`
-	PerPage int `json:"per_page"`
-	Total   int `json:"total"`
+// Pagination describes a page of results.
+type Pagination struct {
+	Total    int `json:"total"`
+	Page     int `json:"page"`
+	PerPage  int `json:"per_page"`
+	LastPage int `json:"last_page"`
 }
 
-// PaginationResponse is the untyped form of PageResponse, for handlers that
-// assemble the payload dynamically.
-type PaginationResponse struct {
-	Data    any `json:"data"`
-	Page    int `json:"page"`
-	PerPage int `json:"per_page"`
-	Total   int `json:"total"`
+// PaginatedData is the data payload for a paginated success response.
+type PaginatedData struct {
+	Items      any        `json:"items"`
+	Pagination Pagination `json:"pagination"`
 }
 
-// ErrorResponse wraps an error payload.
-type ErrorResponse[T any] struct {
-	Errors T `json:"errors"`
-}
-
-// Error writes err as the API error envelope. An *apperror.AppError supplies
-// the status, message, and optional field details; anything else is reported as
-// an internal error and only logged, never echoed to the client.
+// Error writes err using the API response envelope. Internal causes are logged
+// but never exposed to the client.
 func Error(w http.ResponseWriter, err error) {
 	var appErr *apperror.AppError
-
-	if errors.As(err, &appErr) {
-		if appErr.Err != nil {
-			log.Printf("api: internal error: %v", appErr.Err)
-		}
-		body := make(map[string]any)
-		if appErr.Details != nil {
-			body["errors"] = appErr.Details
-		} else {
-			body["errors"] = map[string]string{"message": appErr.Message}
-		}
-		if appErr.Code != "" {
-			body["code"] = appErr.Code
-		}
-		toJSON(w, appErr.Status, body)
+	if !errors.As(err, &appErr) {
+		log.Printf("api: unexpected error: %v", err)
+		writeError(w, http.StatusInternalServerError, "server_error", "Something went wrong", nil)
 		return
 	}
 
-	log.Printf("api: unexpected error: %v", err)
-	toJSON(w, http.StatusInternalServerError, map[string]any{
-		"errors": map[string]string{"message": "an unexpected internal error occurred"},
+	if appErr.Err != nil {
+		log.Printf("api: internal error: %v", appErr.Err)
+	}
+	code := appErr.Code
+	if code == "" {
+		code = errorCode(appErr.Status)
+	}
+	details := make(map[string][]string, len(appErr.Details))
+	for field, message := range appErr.Details {
+		details[field] = []string{message}
+	}
+	if len(details) == 0 {
+		details = nil
+	}
+	writeError(w, appErr.Status, code, appErr.Message, details)
+}
+
+// Success writes payload using the API response envelope. A string is treated
+// as the required message payload for a success without resource data.
+func Success(w http.ResponseWriter, status int, payload any) {
+	if message, ok := payload.(string); ok {
+		payload = map[string]string{"message": message}
+	}
+	toJSON(w, status, Envelope{Data: payload})
+}
+
+func writeError(w http.ResponseWriter, status int, code, message string, details map[string][]string) {
+	toJSON(w, status, Envelope{
+		Error:  &ErrorDetail{Code: code, Message: message},
+		Errors: details,
 	})
 }
 
-// Success writes payload as the API success envelope. A string becomes
-// {"message": ...}; an already-shaped envelope passes through; anything else is
-// wrapped as {"data": ...}.
-func Success(w http.ResponseWriter, code int, payload any) {
-	var envelope any
-
-	switch value := payload.(type) {
-	case nil:
-		w.WriteHeader(code)
-		return
-	case string:
-		envelope = map[string]any{"message": value}
-	case PaginationResponse:
-		envelope = value
+func errorCode(status int) string {
+	switch status {
+	case http.StatusBadRequest:
+		return "bad_request"
+	case http.StatusUnauthorized:
+		return "unauthorized"
+	case http.StatusForbidden:
+		return "forbidden"
+	case http.StatusNotFound:
+		return "not_found"
+	case http.StatusMethodNotAllowed:
+		return "method_not_allowed"
+	case http.StatusConflict:
+		return "conflict"
+	case http.StatusUnsupportedMediaType:
+		return "unsupported_media_type"
+	case http.StatusUnprocessableEntity:
+		return "validation_error"
+	case http.StatusRequestEntityTooLarge:
+		return "request_too_large"
+	case http.StatusTooManyRequests:
+		return "too_many_requests"
+	case http.StatusServiceUnavailable:
+		return "service_unavailable"
 	default:
-		envelope = map[string]any{"data": payload}
+		return "server_error"
 	}
-	toJSON(w, code, envelope)
 }
 
-func toJSON(w http.ResponseWriter, code int, payload any) {
+func toJSON(w http.ResponseWriter, status int, payload Envelope) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("api: could not marshal json response: %v", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
+		body = []byte(`{"data":null,"error":{"code":"server_error","message":"Something went wrong"},"errors":null}`)
+		status = http.StatusInternalServerError
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(code)
+	w.WriteHeader(status)
 	_, _ = w.Write(body)
 }

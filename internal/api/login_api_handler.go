@@ -121,7 +121,7 @@ func (h LoginAPIHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.clearRefreshCookie(w)
-	w.WriteHeader(http.StatusNoContent)
+	Success(w, http.StatusOK, "Logged out successfully")
 }
 
 // Me returns the authenticated user record.

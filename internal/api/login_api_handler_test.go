@@ -320,8 +320,11 @@ func TestAPILogoutRevokesTheRefreshToken(t *testing.T) {
 	refresh := decodeData(t, login)["refresh_token"].(string)
 
 	out := do(t, handler, ctx, http.MethodPost, "/api/auth/logout", `{"refresh_token":"`+refresh+`"}`, nil)
-	if out.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d (%s)", out.Code, out.Body.String())
+	if out.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", out.Code, out.Body.String())
+	}
+	if decodeData(t, out)["message"] != "Logged out successfully" {
+		t.Fatalf("unexpected logout response: %s", out.Body.String())
 	}
 
 	after := do(t, handler, ctx, http.MethodPost, "/api/auth/refresh", `{"refresh_token":"`+refresh+`"}`, nil)
@@ -335,7 +338,7 @@ func TestAPILogoutIsIdempotent(t *testing.T) {
 	defer done()
 
 	rec := do(t, handler, ctx, http.MethodPost, "/api/auth/logout", `{}`, nil)
-	if rec.Code != http.StatusNoContent {
+	if rec.Code != http.StatusOK {
 		t.Fatalf("logging out without a token should succeed, got %d (%s)", rec.Code, rec.Body.String())
 	}
 }

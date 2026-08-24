@@ -25,146 +25,142 @@ func decodeBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 	return body
 }
 
-func TestErrorUsesAppErrorStatusAndMessage(t *testing.T) {
+func requireEnvelopeFields(t *testing.T, body map[string]any) {
+	t.Helper()
+	if len(body) != 3 {
+		t.Fatalf("expected exactly three envelope fields, got %#v", body)
+	}
+	for _, field := range []string{"data", "error", "errors"} {
+		if _, ok := body[field]; !ok {
+			t.Fatalf("missing %q in %#v", field, body)
+		}
+	}
+}
+
+func TestErrorUsesDocumentedEnvelope(t *testing.T) {
 	rec := httptest.NewRecorder()
 	api.Error(rec, apperror.NotFound("user not found"))
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
 	}
-	if got := rec.Header().Get("Content-Type"); got != "application/json; charset=utf-8" {
-		t.Fatalf("unexpected content type: %q", got)
-	}
-	errorsField, ok := decodeBody(t, rec)["errors"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected an errors object, got %s", rec.Body.String())
-	}
-	if errorsField["message"] != "user not found" {
-		t.Fatalf("unexpected message: %v", errorsField["message"])
-	}
-}
-
-func TestErrorIncludesValidationDetailsAndCode(t *testing.T) {
-	rec := httptest.NewRecorder()
-	api.Error(rec, apperror.WithCode(
-		apperror.Validation("invalid", map[string]string{"code": "required"}),
-		"invalid_request",
-	))
-
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422, got %d", rec.Code)
-	}
 	body := decodeBody(t, rec)
-	if body["code"] != "invalid_request" {
-		t.Fatalf("expected the code to be surfaced, got %v", body["code"])
+	requireEnvelopeFields(t, body)
+	if body["data"] != nil || body["errors"] != nil {
+		t.Fatalf("error response must have null data and errors: %s", rec.Body.String())
 	}
-	details, ok := body["errors"].(map[string]any)
-	if !ok || details["code"] != "required" {
-		t.Fatalf("expected field details, got %s", rec.Body.String())
+	detail := body["error"].(map[string]any)
+	if detail["code"] != "not_found" || detail["message"] != "user not found" {
+		t.Fatalf("unexpected error: %#v", detail)
 	}
 }
 
-func TestErrorHidesUnexpectedFailures(t *testing.T) {
+func TestErrorIncludesValidationDetailsAsArrays(t *testing.T) {
 	rec := httptest.NewRecorder()
-	api.Error(rec, errors.New("connection string postgres://user:secret@host/db failed"))
+	api.Error(rec, apperror.Validation("Please check the form fields", map[string]string{"code": "Code is required"}))
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d", rec.Code)
+	body := decodeBody(t, rec)
+	requireEnvelopeFields(t, body)
+	if body["error"].(map[string]any)["code"] != "validation_error" {
+		t.Fatalf("unexpected error: %s", rec.Body.String())
 	}
-	if body := rec.Body.String(); body == "" || strings.Contains(body, "secret") {
-		t.Fatalf("internal detail must not reach the client: %s", body)
+	messages := body["errors"].(map[string]any)["code"].([]any)
+	if len(messages) != 1 || messages[0] != "Code is required" {
+		t.Fatalf("unexpected validation errors: %s", rec.Body.String())
 	}
 }
 
-func TestErrorHidesWrappedInternalCause(t *testing.T) {
+func TestErrorPreservesExplicitCode(t *testing.T) {
 	rec := httptest.NewRecorder()
-	api.Error(rec, apperror.Internal("failed to load user", errors.New("pq: password authentication failed")))
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d", rec.Code)
-	}
-	if strings.Contains(rec.Body.String(), "password") {
-		t.Fatalf("the wrapped cause must stay in the logs: %s", rec.Body.String())
+	api.Error(rec, apperror.WithCode(apperror.BadRequest("invalid"), "invalid_request"))
+	if decodeBody(t, rec)["error"].(map[string]any)["code"] != "invalid_request" {
+		t.Fatalf("unexpected body: %s", rec.Body.String())
 	}
 }
 
-func TestSuccessEnvelopes(t *testing.T) {
-	t.Run("object is wrapped in data", func(t *testing.T) {
+func TestErrorHidesInternalFailures(t *testing.T) {
+	for _, err := range []error{
+		errors.New("connection string postgres://user:secret@host/db failed"),
+		apperror.Internal("failed to load user", errors.New("pq: password authentication failed")),
+	} {
 		rec := httptest.NewRecorder()
-		api.Success(rec, http.StatusOK, map[string]any{"id": 1})
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d", rec.Code)
+		api.Error(rec, err)
+		if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "secret") || strings.Contains(rec.Body.String(), "password") {
+			t.Fatalf("internal detail reached the client: %s", rec.Body.String())
 		}
-		data, ok := decodeBody(t, rec)["data"].(map[string]any)
-		if !ok || data["id"] != float64(1) {
-			t.Fatalf("unexpected body: %s", rec.Body.String())
-		}
-	})
-
-	t.Run("string becomes a message", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		api.Success(rec, http.StatusOK, "deleted")
-
-		if decodeBody(t, rec)["message"] != "deleted" {
-			t.Fatalf("unexpected body: %s", rec.Body.String())
-		}
-	})
-
-	t.Run("pagination envelope passes through", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		api.Success(rec, http.StatusOK, api.PaginationResponse{Data: []int{1, 2}, Page: 2, PerPage: 20, Total: 42})
-
-		body := decodeBody(t, rec)
-		if body["page"] != float64(2) || body["per_page"] != float64(20) || body["total"] != float64(42) {
-			t.Fatalf("expected the envelope to pass through unwrapped: %s", rec.Body.String())
-		}
-	})
-
-	t.Run("nil writes only a status", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		api.Success(rec, http.StatusNoContent, nil)
-
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("expected 204, got %d", rec.Code)
-		}
-		if rec.Body.Len() != 0 {
-			t.Fatalf("expected an empty body, got %s", rec.Body.String())
-		}
-	})
-}
-
-func TestAPIMethodNotAllowed(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/logout", nil)
-	testAPIRouter().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("expected 405, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
-		t.Fatalf("an api 405 must stay json, got %q", rec.Header().Get("Content-Type"))
 	}
 }
 
-func TestAPIRejectsNonJSONContentType(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", strings.NewReader("a=b"))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	testAPIRouter().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnsupportedMediaType {
-		t.Fatalf("expected 415, got %d (%s)", rec.Code, rec.Body.String())
+func TestSuccessUsesDocumentedEnvelope(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload any
+		check   func(*testing.T, map[string]any)
+	}{
+		{"resource", map[string]any{"id": 1}, func(t *testing.T, data map[string]any) {
+			if data["id"] != float64(1) {
+				t.Fatalf("unexpected data: %#v", data)
+			}
+		}},
+		{"message", "Operation completed successfully", func(t *testing.T, data map[string]any) {
+			if data["message"] != "Operation completed successfully" {
+				t.Fatalf("unexpected data: %#v", data)
+			}
+		}},
+		{"pagination", api.PaginatedData{Items: []int{1, 2}, Pagination: api.Pagination{Total: 42, Page: 2, PerPage: 20, LastPage: 3}}, func(t *testing.T, data map[string]any) {
+			if data["pagination"].(map[string]any)["last_page"] != float64(3) {
+				t.Fatalf("unexpected data: %#v", data)
+			}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			api.Success(rec, http.StatusOK, tc.payload)
+			body := decodeBody(t, rec)
+			requireEnvelopeFields(t, body)
+			if body["error"] != nil || body["errors"] != nil {
+				t.Fatalf("unexpected body: %s", rec.Body.String())
+			}
+			tc.check(t, body["data"].(map[string]any))
+		})
 	}
 }
 
-// testAPIRouter mounts the API with services that are never reached, so the
-// routing and middleware layers can be checked on their own.
+func TestAPIRouterErrorsUseEnvelope(t *testing.T) {
+	tests := []struct {
+		name, method, path, contentType string
+		status                          int
+	}{
+		{"method not allowed", http.MethodGet, "/api/auth/logout", "", http.StatusMethodNotAllowed},
+		{"unsupported content type", http.MethodPost, "/api/auth/refresh", "application/x-www-form-urlencoded", http.StatusUnsupportedMediaType},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			var body *strings.Reader
+			if tc.contentType == "" {
+				body = strings.NewReader("")
+			} else {
+				body = strings.NewReader("a=b")
+			}
+			req := httptest.NewRequest(tc.method, tc.path, body)
+			if tc.contentType != "" {
+				req.Header.Set("Content-Type", tc.contentType)
+			}
+			testAPIRouter().ServeHTTP(rec, req)
+			if rec.Code != tc.status {
+				t.Fatalf("expected %d, got %d (%s)", tc.status, rec.Code, rec.Body.String())
+			}
+			requireEnvelopeFields(t, decodeBody(t, rec))
+		})
+	}
+}
+
 func testAPIRouter() http.Handler {
 	r := chi.NewRouter()
 	api.Mount(r, config.Config{
-		AppURL:    "http://127.0.0.1:8080",
-		AppEnv:    "test",
+		AppURL: "http://127.0.0.1:8080", AppEnv: "test",
 		Auth:      config.AuthConfig{API: config.APIAuthConfig{RefreshCookieName: "refresh"}},
 		RateLimit: config.RateLimitConfig{Window: time.Minute, APILogin: 100, APIRefresh: 100},
 	}, appsvc.Services{})
