@@ -166,3 +166,37 @@ func testAPIRouter() http.Handler {
 	}, appsvc.Services{})
 	return r
 }
+
+func TestApplicationErrorHTTPContract(t *testing.T) {
+	cases := []struct {
+		kind   apperror.Kind
+		status int
+		code   string
+	}{
+		{apperror.Invalid, 400, "bad_request"},
+		{apperror.Unauthenticated, 401, "unauthorized"},
+		{apperror.PermissionDenied, 403, "forbidden"},
+		{apperror.Missing, 404, "not_found"},
+		{apperror.MethodNotAllowed, 405, "method_not_allowed"},
+		{apperror.AlreadyExists, 409, "conflict"},
+		{apperror.TooLarge, 413, "request_too_large"},
+		{apperror.UnsupportedMediaType, 415, "unsupported_media_type"},
+		{apperror.InvalidFields, 422, "validation_error"},
+		{apperror.RateLimited, 429, "too_many_requests"},
+		{apperror.UnavailableDependency, 503, "service_unavailable"},
+		{apperror.Unexpected, 500, "server_error"},
+		{apperror.Kind("unknown"), 500, "server_error"},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.kind), func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			api.Error(rec, apperror.New(tc.kind, "failure", nil))
+			body := decodeBody(t, rec)
+			requireEnvelopeFields(t, body)
+			detail := body["error"].(map[string]any)
+			if rec.Code != tc.status || detail["code"] != tc.code || detail["message"] != "failure" || body["data"] != nil || body["errors"] != nil {
+				t.Fatalf("unexpected response: status=%d body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}

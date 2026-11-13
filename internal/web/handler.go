@@ -10,6 +10,7 @@ import (
 	"github.com/benpsk/go-starter/internal/apperror"
 	"github.com/benpsk/go-starter/internal/authctx"
 	"github.com/benpsk/go-starter/internal/config"
+	"github.com/benpsk/go-starter/internal/httperror"
 	"github.com/benpsk/go-starter/internal/web/components"
 )
 
@@ -35,7 +36,7 @@ func Error(w http.ResponseWriter, err error) {
 		} else {
 			body["errors"] = map[string]string{"message": appErr.Message}
 		}
-		toJSON(w, appErr.Status, body)
+		toJSON(w, httperror.Status(appErr.Kind), body)
 		return
 	}
 
@@ -114,5 +115,5 @@ func headerAuthProps(r *http.Request) components.HeaderAuthProps {
 // an account-linking message rather than a generic failure.
 func isConflict(err error) bool {
 	var appErr *apperror.AppError
-	return errors.As(err, &appErr) && appErr.Status == http.StatusConflict
+	return errors.As(err, &appErr) && appErr.Kind == apperror.AlreadyExists
 }

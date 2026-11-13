@@ -1,17 +1,33 @@
 // Package apperror provides the error type shared by every transport in this
-// application. Domain services return an *AppError so handlers can translate a
-// failure into an HTTP status without inspecting concrete error values.
+// application. Domain services describe failures semantically; transports
+// choose how to render them.
 package apperror
 
-import (
-	"fmt"
-	"net/http"
+import "fmt"
+
+// Kind identifies an application failure independently of its transport.
+type Kind string
+
+// Application failure kinds.
+const (
+	Invalid               Kind = "invalid"
+	Unauthenticated       Kind = "unauthenticated"
+	PermissionDenied      Kind = "permission_denied"
+	Missing               Kind = "missing"
+	MethodNotAllowed      Kind = "method_not_allowed"
+	AlreadyExists         Kind = "already_exists"
+	UnsupportedMediaType  Kind = "unsupported_media_type"
+	InvalidFields         Kind = "invalid_fields"
+	TooLarge              Kind = "too_large"
+	RateLimited           Kind = "rate_limited"
+	UnavailableDependency Kind = "unavailable_dependency"
+	Unexpected            Kind = "unexpected"
 )
 
-// AppError carries the HTTP status, the user-facing message, and the internal
+// AppError carries the failure kind, the user-facing message, and the internal
 // cause for a failed operation.
 type AppError struct {
-	Status  int               // HTTP status code (e.g. 400, 404, 500)
+	Kind    Kind              // Semantic category of the failure
 	Message string            // High-level, user-facing message
 	Code    string            // Optional stable machine-readable error code
 	Err     error             // Original internal error, for logging only
@@ -30,10 +46,10 @@ func (e *AppError) Unwrap() error {
 	return e.Err
 }
 
-// New builds an AppError from a status, message, and optional cause.
-func New(status int, message string, err error) *AppError {
+// New builds an AppError from a kind, message, and optional cause.
+func New(kind Kind, message string, err error) *AppError {
 	return &AppError{
-		Status:  status,
+		Kind:    kind,
 		Message: message,
 		Err:     err,
 	}
@@ -48,51 +64,51 @@ func WithCode(err *AppError, code string) *AppError {
 	return err
 }
 
-// Validation reports field-level input errors as 422.
+// Validation constructs an application error.
 func Validation(message string, details map[string]string) *AppError {
 	return &AppError{
-		Status:  http.StatusUnprocessableEntity,
+		Kind:    InvalidFields,
 		Message: message,
 		Details: details,
 	}
 }
 
-// NotFound reports a missing resource as 404.
+// NotFound constructs an application error.
 func NotFound(message string) *AppError {
-	return New(http.StatusNotFound, message, nil)
+	return New(Missing, message, nil)
 }
 
-// BadRequest reports a malformed request as 400.
+// BadRequest constructs an application error.
 func BadRequest(message string) *AppError {
-	return New(http.StatusBadRequest, message, nil)
+	return New(Invalid, message, nil)
 }
 
-// Unauthorized reports a missing or invalid credential as 401.
+// Unauthorized constructs an application error.
 func Unauthorized(message string) *AppError {
-	return New(http.StatusUnauthorized, message, nil)
+	return New(Unauthenticated, message, nil)
 }
 
-// Forbidden reports an authenticated but unpermitted request as 403.
+// Forbidden constructs an application error.
 func Forbidden(message string) *AppError {
-	return New(http.StatusForbidden, message, nil)
+	return New(PermissionDenied, message, nil)
 }
 
-// Conflict reports a uniqueness or state conflict as 409.
+// Conflict constructs an application error.
 func Conflict(message string) *AppError {
-	return New(http.StatusConflict, message, nil)
+	return New(AlreadyExists, message, nil)
 }
 
-// TooManyRequests reports a throttled request as 429.
+// TooManyRequests constructs an application error.
 func TooManyRequests(message string) *AppError {
-	return New(http.StatusTooManyRequests, message, nil)
+	return New(RateLimited, message, nil)
 }
 
-// Unavailable reports an unconfigured or unreachable dependency as 503.
+// Unavailable constructs an application error.
 func Unavailable(message string) *AppError {
-	return New(http.StatusServiceUnavailable, message, nil)
+	return New(UnavailableDependency, message, nil)
 }
 
-// Internal reports an unexpected failure as 500 while retaining the cause.
+// Internal constructs an application error.
 func Internal(message string, err error) *AppError {
-	return New(http.StatusInternalServerError, message, err)
+	return New(Unexpected, message, err)
 }

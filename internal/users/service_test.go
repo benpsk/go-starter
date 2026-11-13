@@ -3,7 +3,6 @@ package users
 import (
 	"context"
 	"errors"
-	"net/http"
 	"testing"
 
 	"github.com/benpsk/go-starter/internal/apperror"
@@ -78,13 +77,13 @@ func (r *repoStub) UpdateFromProfile(_ context.Context, _ int64, _ SocialProfile
 	return nil
 }
 
-func statusOf(t *testing.T, err error) int {
+func kindOf(t *testing.T, err error) apperror.Kind {
 	t.Helper()
 	var appErr *apperror.AppError
 	if !errors.As(err, &appErr) {
 		t.Fatalf("expected an *apperror.AppError, got %T: %v", err, err)
 	}
-	return appErr.Status
+	return appErr.Kind
 }
 
 func codeOf(t *testing.T, err error) string {
@@ -99,8 +98,8 @@ func codeOf(t *testing.T, err error) string {
 func TestFindByIDTranslatesNotFound(t *testing.T) {
 	svc := NewService(newRepoStub())
 
-	if _, err := svc.FindByID(context.Background(), 42); statusOf(t, err) != http.StatusNotFound {
-		t.Fatalf("expected 404, got %v", err)
+	if _, err := svc.FindByID(context.Background(), 42); kindOf(t, err) != apperror.Missing {
+		t.Fatalf("expected a missing resource, got %v", err)
 	}
 }
 
@@ -160,8 +159,8 @@ func TestResolveSocialProfileRejectsEmailOwnedByAnotherProvider(t *testing.T) {
 		Email:          "taken@example.com",
 		EmailVerified:  true,
 	})
-	if statusOf(t, err) != http.StatusConflict {
-		t.Fatalf("expected 409, got %v", err)
+	if kindOf(t, err) != apperror.AlreadyExists {
+		t.Fatalf("expected a conflict, got %v", err)
 	}
 	if codeOf(t, err) != "email_conflict" {
 		t.Fatalf("expected the email_conflict code, got %v", err)
@@ -205,8 +204,8 @@ func TestResolveSocialProfileTranslatesRepositoryConflicts(t *testing.T) {
 				Provider:       "google",
 				ProviderUserID: "g-2",
 			})
-			if statusOf(t, err) != http.StatusConflict {
-				t.Fatalf("expected 409, got %v", err)
+			if kindOf(t, err) != apperror.AlreadyExists {
+				t.Fatalf("expected a conflict, got %v", err)
 			}
 			if codeOf(t, err) != tc.wantCode {
 				t.Fatalf("expected code %q, got %v", tc.wantCode, err)
@@ -219,8 +218,8 @@ func TestResolveSocialProfileRejectsIncompleteProfile(t *testing.T) {
 	svc := NewService(newRepoStub())
 
 	_, err := svc.ResolveSocialProfile(context.Background(), SocialProfile{Provider: "google"})
-	if statusOf(t, err) != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %v", err)
+	if kindOf(t, err) != apperror.Invalid {
+		t.Fatalf("expected invalid input, got %v", err)
 	}
 }
 
@@ -253,8 +252,8 @@ func TestFindByEmail(t *testing.T) {
 	if err != nil || found.ID != 4 {
 		t.Fatalf("FindByEmail = %+v, %v", found, err)
 	}
-	if _, err := svc.FindByEmail(context.Background(), "missing@example.com"); statusOf(t, err) != http.StatusNotFound {
-		t.Fatalf("expected 404, got %v", err)
+	if _, err := svc.FindByEmail(context.Background(), "missing@example.com"); kindOf(t, err) != apperror.Missing {
+		t.Fatalf("expected a missing resource, got %v", err)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/benpsk/go-starter/internal/apperror"
+	"github.com/benpsk/go-starter/internal/httperror"
 )
 
 // Envelope is the response shape shared by every JSON API endpoint.
@@ -51,7 +52,7 @@ func Error(w http.ResponseWriter, err error) {
 	}
 	code := appErr.Code
 	if code == "" {
-		code = errorCode(appErr.Status)
+		code = errorCode(httperror.Status(appErr.Kind))
 	}
 	details := make(map[string][]string, len(appErr.Details))
 	for field, message := range appErr.Details {
@@ -60,7 +61,7 @@ func Error(w http.ResponseWriter, err error) {
 	if len(details) == 0 {
 		details = nil
 	}
-	writeError(w, appErr.Status, code, appErr.Message, details)
+	writeError(w, httperror.Status(appErr.Kind), code, appErr.Message, details)
 }
 
 // Success writes payload using the API response envelope. A string is treated

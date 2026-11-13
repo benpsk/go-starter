@@ -21,7 +21,7 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			return apperror.New(http.StatusRequestEntityTooLarge, "request body too large", err)
+			return apperror.New(apperror.TooLarge, "request body too large", err)
 		}
 		if errors.Is(err, io.EOF) {
 			return io.EOF

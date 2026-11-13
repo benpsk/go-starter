@@ -59,7 +59,7 @@ func requireJSONContentType(next http.Handler) http.Handler {
 		if r.Body != nil && r.ContentLength != 0 {
 			mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 			if err != nil || mediaType != "application/json" {
-				Error(w, apperror.New(http.StatusUnsupportedMediaType, "content type must be application/json", nil))
+				Error(w, apperror.New(apperror.UnsupportedMediaType, "content type must be application/json", nil))
 				return
 			}
 		}
@@ -72,5 +72,5 @@ func notFound(w http.ResponseWriter, _ *http.Request) {
 }
 
 func methodNotAllowed(w http.ResponseWriter, _ *http.Request) {
-	Error(w, apperror.New(http.StatusMethodNotAllowed, "method not allowed", nil))
+	Error(w, apperror.New(apperror.MethodNotAllowed, "method not allowed", nil))
 }

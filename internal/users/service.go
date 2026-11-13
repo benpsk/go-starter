@@ -6,7 +6,6 @@ package users
 import (
 	"context"
 	"errors"
-	"net/http"
 	"strings"
 	"time"
 
@@ -185,5 +184,5 @@ func translate(err error, notFoundMessage, internalMessage string) error {
 	if errors.As(err, &appErr) {
 		return appErr
 	}
-	return apperror.New(http.StatusInternalServerError, internalMessage, err)
+	return apperror.Internal(internalMessage, err)
 }

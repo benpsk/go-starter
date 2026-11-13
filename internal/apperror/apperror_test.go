@@ -2,13 +2,12 @@ package apperror
 
 import (
 	"errors"
-	"net/http"
 	"testing"
 )
 
 func TestAppErrorWrapsCause(t *testing.T) {
 	cause := errors.New("db down")
-	err := New(http.StatusInternalServerError, "failed", cause)
+	err := New(Unexpected, "failed", cause)
 
 	if err.Error() != "failed: db down" {
 		t.Fatalf("unexpected error string: %q", err.Error())
@@ -31,28 +30,28 @@ func TestWithCode(t *testing.T) {
 	}
 }
 
-func TestConstructorStatuses(t *testing.T) {
+func TestConstructorKinds(t *testing.T) {
 	cause := errors.New("boom")
 	cases := []struct {
-		name   string
-		err    *AppError
-		status int
+		name string
+		err  *AppError
+		kind Kind
 	}{
-		{"validation", Validation("invalid", map[string]string{"name": "required"}), http.StatusUnprocessableEntity},
-		{"not found", NotFound("missing"), http.StatusNotFound},
-		{"bad request", BadRequest("bad"), http.StatusBadRequest},
-		{"unauthorized", Unauthorized("login"), http.StatusUnauthorized},
-		{"forbidden", Forbidden("denied"), http.StatusForbidden},
-		{"conflict", Conflict("taken"), http.StatusConflict},
-		{"too many requests", TooManyRequests("slow down"), http.StatusTooManyRequests},
-		{"unavailable", Unavailable("not configured"), http.StatusServiceUnavailable},
-		{"internal", Internal("boom", cause), http.StatusInternalServerError},
+		{"validation", Validation("invalid", map[string]string{"name": "required"}), InvalidFields},
+		{"not found", NotFound("missing"), Missing},
+		{"bad request", BadRequest("bad"), Invalid},
+		{"unauthorized", Unauthorized("login"), Unauthenticated},
+		{"forbidden", Forbidden("denied"), PermissionDenied},
+		{"conflict", Conflict("taken"), AlreadyExists},
+		{"too many requests", TooManyRequests("slow down"), RateLimited},
+		{"unavailable", Unavailable("not configured"), UnavailableDependency},
+		{"internal", Internal("boom", cause), Unexpected},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.err.Status != tc.status {
-				t.Fatalf("expected status %d, got %d", tc.status, tc.err.Status)
+			if tc.err.Kind != tc.kind {
+				t.Fatalf("expected kind %s, got %s", tc.kind, tc.err.Kind)
 			}
 			if tc.err.Message == "" {
 				t.Fatalf("expected a message")

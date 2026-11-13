@@ -2,6 +2,7 @@ package login
 
 import (
 	"context"
+	"github.com/benpsk/go-starter/internal/apperror"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -50,7 +51,7 @@ func TestIssueTokenPairRequiresConfiguredSecret(t *testing.T) {
 	cfg.AccessTokenSecret = ""
 	svc, _ := newTestService(t, cfg, &verifierStub{}, &userServiceStub{})
 
-	if _, err := svc.IssueTokenPair(context.Background(), 1, time.Now()); statusOf(t, err) != http.StatusServiceUnavailable {
+	if _, err := svc.IssueTokenPair(context.Background(), 1, time.Now()); kindOf(t, err) != apperror.UnavailableDependency {
 		t.Fatalf("expected 503, got %v", err)
 	}
 }
@@ -95,7 +96,7 @@ func TestRotateRefreshTokenReuseRevokesFamily(t *testing.T) {
 
 	// Replaying the already-rotated token means it leaked, so the whole family
 	// must be revoked rather than just the replayed token.
-	if _, err := svc.RotateRefreshToken(context.Background(), first.RefreshToken, now); statusOf(t, err) != http.StatusUnauthorized {
+	if _, err := svc.RotateRefreshToken(context.Background(), first.RefreshToken, now); kindOf(t, err) != apperror.Unauthenticated {
 		t.Fatalf("expected 401 on reuse, got %v", err)
 	}
 	if len(repo.familyRevoked) != 1 {
@@ -107,18 +108,18 @@ func TestRotateRefreshTokenRejectsUnknownAndEmpty(t *testing.T) {
 	svc, _ := newTestService(t, testConfig(), &verifierStub{}, &userServiceStub{})
 
 	cases := []struct {
-		name       string
-		token      string
-		wantStatus int
+		name     string
+		token    string
+		wantKind apperror.Kind
 	}{
-		{"empty", "", http.StatusBadRequest},
-		{"unknown", "not-a-token", http.StatusUnauthorized},
+		{"empty", "", apperror.Invalid},
+		{"unknown", "not-a-token", apperror.Unauthenticated},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := svc.RotateRefreshToken(context.Background(), tc.token, time.Now())
-			if got := statusOf(t, err); got != tc.wantStatus {
-				t.Fatalf("expected %d, got %d (%v)", tc.wantStatus, got, err)
+			if got := kindOf(t, err); got != tc.wantKind {
+				t.Fatalf("expected %s, got %s (%v)", tc.wantKind, got, err)
 			}
 		})
 	}
@@ -139,7 +140,7 @@ func TestRevokeRefreshTokenIsIdempotent(t *testing.T) {
 		t.Fatalf("expected exactly one revocation, got %v", repo.revoked)
 	}
 
-	if _, err := svc.RotateRefreshToken(context.Background(), pair.RefreshToken, now); statusOf(t, err) != http.StatusUnauthorized {
+	if _, err := svc.RotateRefreshToken(context.Background(), pair.RefreshToken, now); kindOf(t, err) != apperror.Unauthenticated {
 		t.Fatalf("a revoked token must not rotate, got %v", err)
 	}
 }
@@ -178,7 +179,7 @@ func TestParseAccessTokenRejectsBadTokens(t *testing.T) {
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("ParseAccessToken error = %v, wantErr %v", err, tc.wantErr)
 			}
-			if err != nil && statusOf(t, err) != http.StatusUnauthorized {
+			if err != nil && kindOf(t, err) != apperror.Unauthenticated {
 				t.Fatalf("expected 401, got %v", err)
 			}
 		})
@@ -262,7 +263,7 @@ func TestPruneRefreshTokens(t *testing.T) {
 func TestPruneRefreshTokensRejectsANegativeGrace(t *testing.T) {
 	svc, _ := newTestService(t, testConfig(), &verifierStub{}, &userServiceStub{})
 
-	if _, err := svc.PruneRefreshTokens(context.Background(), -time.Hour, time.Now()); statusOf(t, err) != http.StatusBadRequest {
+	if _, err := svc.PruneRefreshTokens(context.Background(), -time.Hour, time.Now()); kindOf(t, err) != apperror.Invalid {
 		t.Fatalf("expected 400, got %v", err)
 	}
 }

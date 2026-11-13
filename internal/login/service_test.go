@@ -3,7 +3,6 @@ package login
 import (
 	"context"
 	"errors"
-	"net/http"
 	"net/url"
 	"testing"
 	"time"
@@ -151,13 +150,13 @@ func newTestService(t *testing.T, cfg Config, verifier SocialVerifier, userSvc u
 	return NewService(repo, userSvc, verifier, cfg), repo
 }
 
-func statusOf(t *testing.T, err error) int {
+func kindOf(t *testing.T, err error) apperror.Kind {
 	t.Helper()
 	var appErr *apperror.AppError
 	if !errors.As(err, &appErr) {
 		t.Fatalf("expected an *apperror.AppError, got %T: %v", err, err)
 	}
-	return appErr.Status
+	return appErr.Kind
 }
 
 func TestProviderConfigAndEnabled(t *testing.T) {
@@ -227,7 +226,7 @@ func TestStartOAuthRejectsUnconfiguredProvider(t *testing.T) {
 	svc, _ := newTestService(t, cfg, &verifierStub{}, &userServiceStub{})
 
 	_, err := svc.StartOAuth("google", "/account", time.Now())
-	if statusOf(t, err) != http.StatusBadRequest {
+	if kindOf(t, err) != apperror.Invalid {
 		t.Fatalf("expected 400, got %v", err)
 	}
 	if !IsProviderNotConfigured(err) {
@@ -275,7 +274,7 @@ func TestCompleteOAuthStateIsSingleUse(t *testing.T) {
 	if _, err := svc.CompleteOAuth(context.Background(), "google", start.State, "code", now); err != nil {
 		t.Fatalf("first callback should succeed: %v", err)
 	}
-	if _, err := svc.CompleteOAuth(context.Background(), "google", start.State, "code", now); statusOf(t, err) != http.StatusUnauthorized {
+	if _, err := svc.CompleteOAuth(context.Background(), "google", start.State, "code", now); kindOf(t, err) != apperror.Unauthenticated {
 		t.Fatalf("a replayed state must be rejected, got %v", err)
 	}
 }
@@ -286,22 +285,22 @@ func TestCompleteOAuthRejectsBadInput(t *testing.T) {
 	start, _ := svc.StartOAuth("google", "/account", now)
 
 	cases := []struct {
-		name       string
-		provider   string
-		state      string
-		code       string
-		wantStatus int
+		name     string
+		provider string
+		state    string
+		code     string
+		wantKind apperror.Kind
 	}{
-		{"missing code", "google", start.State, "", http.StatusBadRequest},
-		{"missing state", "google", "", "code", http.StatusBadRequest},
-		{"unknown state", "google", "not-a-state", "code", http.StatusUnauthorized},
-		{"provider mismatch", "github", start.State, "code", http.StatusUnauthorized},
+		{"missing code", "google", start.State, "", apperror.Invalid},
+		{"missing state", "google", "", "code", apperror.Invalid},
+		{"unknown state", "google", "not-a-state", "code", apperror.Unauthenticated},
+		{"provider mismatch", "github", start.State, "code", apperror.Unauthenticated},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := svc.CompleteOAuth(context.Background(), tc.provider, tc.state, tc.code, now)
-			if got := statusOf(t, err); got != tc.wantStatus {
-				t.Fatalf("expected %d, got %d (%v)", tc.wantStatus, got, err)
+			if got := kindOf(t, err); got != tc.wantKind {
+				t.Fatalf("expected %s, got %s (%v)", tc.wantKind, got, err)
 			}
 		})
 	}
@@ -316,7 +315,7 @@ func TestCompleteOAuthExpiredFlowIsRejected(t *testing.T) {
 	start, _ := svc.StartOAuth("google", "/account", now)
 
 	_, err := svc.CompleteOAuth(context.Background(), "google", start.State, "code", now.Add(2*time.Minute))
-	if statusOf(t, err) != http.StatusUnauthorized {
+	if kindOf(t, err) != apperror.Unauthenticated {
 		t.Fatalf("expected an expired flow to be rejected, got %v", err)
 	}
 }
@@ -327,24 +326,24 @@ func TestExchangeCodeValidatesInput(t *testing.T) {
 	cases := []struct {
 		name                     string
 		code, verifier, redirect string
-		wantStatus               int
+		wantKind                 apperror.Kind
 	}{
-		{"complete", "code", "verifier", "app://cb", 0},
-		{"missing code", "", "verifier", "app://cb", http.StatusUnprocessableEntity},
-		{"missing verifier", "code", "", "app://cb", http.StatusUnprocessableEntity},
-		{"missing redirect", "code", "verifier", "", http.StatusUnprocessableEntity},
+		{"complete", "code", "verifier", "app://cb", ""},
+		{"missing code", "", "verifier", "app://cb", apperror.InvalidFields},
+		{"missing verifier", "code", "", "app://cb", apperror.InvalidFields},
+		{"missing redirect", "code", "verifier", "", apperror.InvalidFields},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := svc.ExchangeCode(context.Background(), "google", tc.code, tc.verifier, tc.redirect)
-			if tc.wantStatus == 0 {
+			if tc.wantKind == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
 				return
 			}
-			if got := statusOf(t, err); got != tc.wantStatus {
-				t.Fatalf("expected %d, got %d (%v)", tc.wantStatus, got, err)
+			if got := kindOf(t, err); got != tc.wantKind {
+				t.Fatalf("expected %s, got %s (%v)", tc.wantKind, got, err)
 			}
 		})
 	}
@@ -354,7 +353,7 @@ func TestExchangeCodeSurfacesVerificationFailure(t *testing.T) {
 	svc, _ := newTestService(t, testConfig(), &verifierStub{err: errors.New("provider said no")}, &userServiceStub{})
 
 	_, err := svc.ExchangeCode(context.Background(), "google", "code", "verifier", "app://cb")
-	if statusOf(t, err) != http.StatusUnauthorized {
+	if kindOf(t, err) != apperror.Unauthenticated {
 		t.Fatalf("expected 401, got %v", err)
 	}
 }
