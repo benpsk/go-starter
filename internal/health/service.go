@@ -28,28 +28,24 @@ type DatabaseDetails struct {
 	Message string `json:"message,omitempty"`
 }
 
-// Service exposes health reporting.
-type Service interface {
-	Status(ctx context.Context) (Status, error)
-}
-
 // Repository abstracts the dependency checks health reporting needs.
 type Repository interface {
 	Ping(ctx context.Context) error
 }
 
-type service struct {
+// Service implements the health application operations.
+type Service struct {
 	repo Repository
 }
 
 // NewService constructs a health service using the supplied repository.
-func NewService(repo Repository) Service {
-	return &service{repo: repo}
+func NewService(repo Repository) *Service {
+	return &Service{repo: repo}
 }
 
 // Status probes the datastore and reports aggregate readiness. A failed probe
 // is a degraded status, not an error: the caller still needs a payload to send.
-func (s *service) Status(ctx context.Context) (Status, error) {
+func (s *Service) Status(ctx context.Context) (Status, error) {
 	out := Status{
 		Status:    StatusOK,
 		CheckedAt: time.Now().UTC(),

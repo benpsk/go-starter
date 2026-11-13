@@ -5,15 +5,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/benpsk/go-starter/internal/api"
+	"github.com/benpsk/go-starter/internal/appsvc"
+	usersession "github.com/benpsk/go-starter/internal/auth/user"
+	"github.com/benpsk/go-starter/internal/config"
+	healthapi "github.com/benpsk/go-starter/internal/health/api"
+	loginapi "github.com/benpsk/go-starter/internal/login/api"
+	loginweb "github.com/benpsk/go-starter/internal/login/web"
+	usersweb "github.com/benpsk/go-starter/internal/users/web"
+	"github.com/benpsk/go-starter/internal/web"
+	webstatic "github.com/benpsk/go-starter/static"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
-
-	"github.com/benpsk/go-starter/internal/api"
-	usersession "github.com/benpsk/go-starter/internal/auth/user"
-	"github.com/benpsk/go-starter/internal/config"
-	"github.com/benpsk/go-starter/internal/web"
-	webstatic "github.com/benpsk/go-starter/static"
 )
 
 // requestTimeout bounds how long any single request may run.
@@ -22,9 +26,8 @@ const requestTimeout = 30 * time.Second
 // newHTTPRouter builds the composition root: global middleware, static assets,
 // health checks, and the mounted transport routers (browser + JSON API).
 //
-// Nothing else belongs here. Handlers and services are constructed in cmd/app
-// and reach this function through Services.
-func newHTTPRouter(cfg config.Config, userSessions *usersession.Manager, services Services) chi.Router {
+// Feature adapters register their handlers; internal/app constructs services.
+func newHTTPRouter(cfg config.Config, userSessions *usersession.Manager, services appsvc.Services) chi.Router {
 	r := chi.NewRouter()
 
 	development := !cfg.IsProduction()
@@ -68,12 +71,14 @@ func newHTTPRouter(cfg config.Config, userSessions *usersession.Manager, service
 		r.Handle(mediaPrefix+"*", http.StripPrefix(mediaPrefix, http.FileServer(http.Dir(cfg.Storage.LocalDir))))
 	}
 
-	health := NewHealthHandler(services.Health)
-	r.Get("/healthz", health.Live)
-	r.Get("/readyz", health.Ready)
-
-	web.Mount(r, cfg, userSessions, services)
-	api.Mount(r, cfg, services)
+	healthapi.Mount(r, services.Health)
+	web.Mount(r, cfg, userSessions, func(browser chi.Router, session web.SessionMiddleware) {
+		loginweb.Mount(browser, cfg, userSessions, services.Login, session)
+		usersweb.Mount(browser, cfg.Setting(), services.Users, session)
+	})
+	api.Mount(r, func(apiRouter chi.Router) {
+		loginapi.Mount(apiRouter, cfg, services.Login, services.Users)
+	})
 
 	return r
 }

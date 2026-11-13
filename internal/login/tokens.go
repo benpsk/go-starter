@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -62,7 +61,7 @@ type accessClaims struct {
 }
 
 // IssueTokenPair mints a new refresh token family plus its first access token.
-func (s *service) IssueTokenPair(ctx context.Context, userID int64, now time.Time) (TokenPair, error) {
+func (s *Service) IssueTokenPair(ctx context.Context, userID int64, now time.Time) (TokenPair, error) {
 	if !s.APITokensConfigured() {
 		return TokenPair{}, apperror.Unavailable("api auth is not configured")
 	}
@@ -100,7 +99,7 @@ func (s *service) IssueTokenPair(ctx context.Context, userID int64, now time.Tim
 // RotateRefreshToken swaps a refresh token for a fresh pair. Replaying an
 // already-rotated token revokes the whole family, because a replay means the
 // token leaked.
-func (s *service) RotateRefreshToken(ctx context.Context, refreshToken string, now time.Time) (TokenPair, error) {
+func (s *Service) RotateRefreshToken(ctx context.Context, refreshToken string, now time.Time) (TokenPair, error) {
 	if !s.APITokensConfigured() {
 		return TokenPair{}, apperror.Unavailable("api auth is not configured")
 	}
@@ -141,7 +140,7 @@ func (s *service) RotateRefreshToken(ctx context.Context, refreshToken string, n
 
 // RevokeRefreshToken invalidates one refresh token, ignoring unknown values so
 // logout stays idempotent.
-func (s *service) RevokeRefreshToken(ctx context.Context, refreshToken string, now time.Time) error {
+func (s *Service) RevokeRefreshToken(ctx context.Context, refreshToken string, now time.Time) error {
 	if strings.TrimSpace(refreshToken) == "" {
 		return nil
 	}
@@ -154,7 +153,7 @@ func (s *service) RevokeRefreshToken(ctx context.Context, refreshToken string, n
 // PruneRefreshTokens deletes refresh tokens whose usefulness has lapsed. The
 // grace period keeps recently revoked rows around long enough to stay visible
 // while an incident is being investigated.
-func (s *service) PruneRefreshTokens(ctx context.Context, olderThan time.Duration, now time.Time) (int64, error) {
+func (s *Service) PruneRefreshTokens(ctx context.Context, olderThan time.Duration, now time.Time) (int64, error) {
 	if olderThan < 0 {
 		return 0, apperror.BadRequest("grace period must not be negative")
 	}
@@ -166,7 +165,7 @@ func (s *service) PruneRefreshTokens(ctx context.Context, olderThan time.Duratio
 }
 
 // ParseAccessToken validates a bearer token's signature, audience, and expiry.
-func (s *service) ParseAccessToken(token string) (AccessTokenClaims, error) {
+func (s *Service) ParseAccessToken(token string) (AccessTokenClaims, error) {
 	token = strings.TrimSpace(token)
 	if token == "" || !s.APITokensConfigured() {
 		return AccessTokenClaims{}, apperror.Unauthorized("unauthorized")
@@ -191,7 +190,7 @@ func (s *service) ParseAccessToken(token string) (AccessTokenClaims, error) {
 	return AccessTokenClaims{UserID: userID, FamilyID: strings.TrimSpace(claims.FamilyID)}, nil
 }
 
-func (s *service) signAccessToken(userID int64, familyID string, now time.Time) (string, time.Time, error) {
+func (s *Service) signAccessToken(userID int64, familyID string, now time.Time) (string, time.Time, error) {
 	if userID <= 0 {
 		return "", time.Time{}, apperror.Unauthorized("unauthorized")
 	}
@@ -223,16 +222,4 @@ func (s *service) signAccessToken(userID int64, familyID string, now time.Time) 
 func HashToken(raw string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(raw)))
 	return hex.EncodeToString(sum[:])
-}
-
-// BearerTokenFromRequest extracts the credential from an Authorization header.
-func BearerTokenFromRequest(r *http.Request) string {
-	if r == nil {
-		return ""
-	}
-	header := strings.TrimSpace(r.Header.Get("Authorization"))
-	if len(header) < 7 || !strings.EqualFold(header[:7], "Bearer ") {
-		return ""
-	}
-	return strings.TrimSpace(header[7:])
 }

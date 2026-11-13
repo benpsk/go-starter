@@ -8,16 +8,17 @@ import (
 	"time"
 
 	loginsvc "github.com/benpsk/go-starter/internal/login"
+	db "github.com/benpsk/go-starter/internal/postgres"
 	"github.com/jackc/pgx/v5"
 )
 
 // LoginRepository provides Postgres-backed storage for API refresh tokens.
 type LoginRepository struct {
-	db Querier
+	db db.Querier
 }
 
 // NewLoginRepository constructs a login repository instance.
-func NewLoginRepository(db Querier) *LoginRepository {
+func NewLoginRepository(db db.Querier) *LoginRepository {
 	return &LoginRepository{db: db}
 }
 
@@ -28,7 +29,7 @@ const refreshTokenColumns = `id, user_id, family_id, token_hash, expires_at, cre
 
 // CreateRefreshToken stores a new refresh token hash.
 func (r *LoginRepository) CreateRefreshToken(ctx context.Context, token loginsvc.RefreshToken) error {
-	_, err := QuerierFromContext(ctx, r.db).Exec(ctx, `
+	_, err := db.QuerierFromContext(ctx, r.db).Exec(ctx, `
         insert into api_refresh_tokens (user_id, family_id, token_hash, expires_at)
         values ($1, $2, $3, $4)
     `, token.UserID, strings.TrimSpace(token.FamilyID), strings.TrimSpace(token.TokenHash), token.ExpiresAt)
@@ -42,7 +43,7 @@ func (r *LoginRepository) CreateRefreshToken(ctx context.Context, token loginsvc
 // transaction. A token that was already rotated, revoked, or expired means the
 // credential leaked, so the caller is told to revoke the whole family.
 func (r *LoginRepository) RotateRefreshToken(ctx context.Context, currentHash string, next loginsvc.RefreshToken, now time.Time) (loginsvc.RotationResult, error) {
-	tx, err := QuerierFromContext(ctx, r.db).Begin(ctx)
+	tx, err := db.QuerierFromContext(ctx, r.db).Begin(ctx)
 	if err != nil {
 		return loginsvc.RotationResult{}, fmt.Errorf("begin rotate api refresh token: %w", err)
 	}
@@ -125,7 +126,7 @@ func (r *LoginRepository) RotateRefreshToken(ctx context.Context, currentHash st
 
 // RevokeRefreshTokenByHash invalidates a single refresh token.
 func (r *LoginRepository) RevokeRefreshTokenByHash(ctx context.Context, tokenHash string, now time.Time) error {
-	_, err := QuerierFromContext(ctx, r.db).Exec(ctx, `
+	_, err := db.QuerierFromContext(ctx, r.db).Exec(ctx, `
         update api_refresh_tokens
         set revoked_at = coalesce(revoked_at, $2)
         where token_hash = $1
@@ -138,7 +139,7 @@ func (r *LoginRepository) RevokeRefreshTokenByHash(ctx context.Context, tokenHas
 
 // RevokeRefreshTokenFamily invalidates every token descended from one login.
 func (r *LoginRepository) RevokeRefreshTokenFamily(ctx context.Context, familyID string, now time.Time) error {
-	_, err := QuerierFromContext(ctx, r.db).Exec(ctx, `
+	_, err := db.QuerierFromContext(ctx, r.db).Exec(ctx, `
         update api_refresh_tokens
         set revoked_at = coalesce(revoked_at, $2)
         where family_id = $1
@@ -153,7 +154,7 @@ func (r *LoginRepository) RevokeRefreshTokenFamily(ctx context.Context, familyID
 // maintenance commands.
 func (r *LoginRepository) FindRefreshTokenByHash(ctx context.Context, tokenHash string) (loginsvc.RefreshToken, error) {
 	var out loginsvc.RefreshToken
-	err := QuerierFromContext(ctx, r.db).QueryRow(ctx, `
+	err := db.QuerierFromContext(ctx, r.db).QueryRow(ctx, `
         select `+refreshTokenColumns+`
         from api_refresh_tokens
         where token_hash = $1
@@ -177,7 +178,7 @@ func (r *LoginRepository) FindRefreshTokenByHash(ctx context.Context, tokenHash 
 // same moment as revoked_at, so reuse detection still catches a replay through
 // the revoked_at check even after the pointer is gone.
 func (r *LoginRepository) DeleteRefreshTokensBefore(ctx context.Context, cutoff time.Time) (int64, error) {
-	tag, err := QuerierFromContext(ctx, r.db).Exec(ctx, `
+	tag, err := db.QuerierFromContext(ctx, r.db).Exec(ctx, `
         delete from api_refresh_tokens
         where expires_at < $1
            or (revoked_at is not null and revoked_at < $1)

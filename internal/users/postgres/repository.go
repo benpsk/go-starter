@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	db "github.com/benpsk/go-starter/internal/postgres"
 	"github.com/benpsk/go-starter/internal/users"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -13,11 +14,11 @@ import (
 
 // UserRepository provides Postgres-backed user and identity access.
 type UserRepository struct {
-	db Querier
+	db db.Querier
 }
 
 // NewUserRepository constructs a user repository instance.
-func NewUserRepository(db Querier) *UserRepository {
+func NewUserRepository(db db.Querier) *UserRepository {
 	return &UserRepository{db: db}
 }
 
@@ -26,7 +27,7 @@ const userColumns = `id, coalesce(email, ''), display_name, coalesce(avatar_url,
 // FindByID retrieves one user by primary key.
 func (r *UserRepository) FindByID(ctx context.Context, id int64) (users.User, error) {
 	var out users.User
-	err := QuerierFromContext(ctx, r.db).QueryRow(ctx, `
+	err := db.QuerierFromContext(ctx, r.db).QueryRow(ctx, `
         select `+userColumns+`
         from users
         where id = $1
@@ -47,7 +48,7 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (users.U
 		return users.User{}, users.ErrNotFound
 	}
 	var out users.User
-	err := QuerierFromContext(ctx, r.db).QueryRow(ctx, `
+	err := db.QuerierFromContext(ctx, r.db).QueryRow(ctx, `
         select `+userColumns+`
         from users
         where email = $1
@@ -64,7 +65,7 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (users.U
 // FindByIdentity retrieves the user behind one external provider account.
 func (r *UserRepository) FindByIdentity(ctx context.Context, provider, providerUserID string) (users.User, error) {
 	var out users.User
-	err := QuerierFromContext(ctx, r.db).QueryRow(ctx, `
+	err := db.QuerierFromContext(ctx, r.db).QueryRow(ctx, `
         select u.id, coalesce(u.email, ''), u.display_name, coalesce(u.avatar_url, ''), u.created_at, u.updated_at
         from user_identities ui
         join users u on u.id = ui.user_id
@@ -83,7 +84,7 @@ func (r *UserRepository) FindByIdentity(ctx context.Context, provider, providerU
 
 // ListIdentitiesByUserID retrieves every provider linked to one account.
 func (r *UserRepository) ListIdentitiesByUserID(ctx context.Context, userID int64) ([]users.Identity, error) {
-	rows, err := QuerierFromContext(ctx, r.db).Query(ctx, `
+	rows, err := db.QuerierFromContext(ctx, r.db).Query(ctx, `
         select
             id, user_id, provider, provider_user_id,
             coalesce(provider_email, ''), coalesce(provider_name, ''),
@@ -122,7 +123,7 @@ func (r *UserRepository) CreateWithIdentity(ctx context.Context, profile users.S
 		return users.User{}, err
 	}
 
-	tx, err := QuerierFromContext(ctx, r.db).Begin(ctx)
+	tx, err := db.QuerierFromContext(ctx, r.db).Begin(ctx)
 	if err != nil {
 		return users.User{}, fmt.Errorf("begin create user with identity: %w", err)
 	}
@@ -185,7 +186,7 @@ func (r *UserRepository) CreateWithIdentity(ctx context.Context, profile users.S
 // provider profile, leaving existing values in place when the profile omits
 // them.
 func (r *UserRepository) UpdateFromProfile(ctx context.Context, userID int64, profile users.SocialProfile) error {
-	db := QuerierFromContext(ctx, r.db)
+	db := db.QuerierFromContext(ctx, r.db)
 	_, err := db.Exec(ctx, `
         update users
         set display_name = coalesce(nullif($2, ''), display_name),

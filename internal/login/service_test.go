@@ -144,7 +144,7 @@ func testConfig() Config {
 	}
 }
 
-func newTestService(t *testing.T, cfg Config, verifier SocialVerifier, userSvc users.Service) (Service, *tokenRepoStub) {
+func newTestService(t *testing.T, cfg Config, verifier SocialVerifier, userSvc UserResolver) (*Service, *tokenRepoStub) {
 	t.Helper()
 	repo := newTokenRepoStub()
 	return NewService(repo, userSvc, verifier, cfg), repo
@@ -227,7 +227,7 @@ func TestStartOAuthRejectsUnconfiguredProvider(t *testing.T) {
 
 	_, err := svc.StartOAuth("google", "/account", time.Now())
 	if kindOf(t, err) != apperror.Invalid {
-		t.Fatalf("expected 400, got %v", err)
+		t.Fatalf("expected invalid input, got %v", err)
 	}
 	if !IsProviderNotConfigured(err) {
 		t.Fatalf("expected the provider_not_configured code, got %v", err)
@@ -354,6 +354,6 @@ func TestExchangeCodeSurfacesVerificationFailure(t *testing.T) {
 
 	_, err := svc.ExchangeCode(context.Background(), "google", "code", "verifier", "app://cb")
 	if kindOf(t, err) != apperror.Unauthenticated {
-		t.Fatalf("expected 401, got %v", err)
+		t.Fatalf("expected an unauthenticated error, got %v", err)
 	}
 }

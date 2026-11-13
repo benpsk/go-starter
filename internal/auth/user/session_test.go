@@ -8,9 +8,9 @@ import (
 	"time"
 
 	usersession "github.com/benpsk/go-starter/internal/auth/user"
-	"github.com/benpsk/go-starter/internal/postgres"
 	"github.com/benpsk/go-starter/internal/testutil"
 	"github.com/benpsk/go-starter/internal/users"
+	userspg "github.com/benpsk/go-starter/internal/users/postgres"
 )
 
 const cookieName = "go_starter_session"
@@ -23,7 +23,7 @@ func newManager(t *testing.T, secure bool) (*usersession.Manager, users.User, fu
 	pool := testutil.SetupDB(t)
 	ctx, tx, done := testutil.BeginTx(t, pool)
 
-	owner, err := postgres.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
+	owner, err := userspg.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
 		Provider:       "google",
 		ProviderUserID: "g-session-1",
 		Email:          "session@example.com",
@@ -201,7 +201,7 @@ func TestValidateRejectsAnExpiredSession(t *testing.T) {
 	ctx, tx, done := testutil.BeginTx(t, pool)
 	defer done()
 
-	owner, err := postgres.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
+	owner, err := userspg.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
 		Provider:       "google",
 		ProviderUserID: "g-session-expired",
 		Email:          "expired-session@example.com",
@@ -235,7 +235,7 @@ func TestValidateRejectsARevokedSession(t *testing.T) {
 	ctx, tx, done := testutil.BeginTx(t, pool)
 	defer done()
 
-	owner, err := postgres.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
+	owner, err := userspg.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
 		Provider:       "google",
 		ProviderUserID: "g-session-revoked",
 		Email:          "revoked-session@example.com",
@@ -268,7 +268,7 @@ func TestPruneExpired(t *testing.T) {
 	ctx, tx, done := testutil.BeginTx(t, pool)
 	defer done()
 
-	owner, err := postgres.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
+	owner, err := userspg.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
 		Provider:       "google",
 		ProviderUserID: "g-session-prune",
 		Email:          "prune-session@example.com",

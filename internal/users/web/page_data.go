@@ -1,17 +1,6 @@
-package components
+package web
 
-// LoginProps drives the sign-in page.
-type LoginProps struct {
-	PageProps
-	Error         string
-	GoogleEnabled bool
-	GitHubEnabled bool
-}
-
-// AnyProviderEnabled reports whether at least one provider can be offered.
-func (p LoginProps) AnyProviderEnabled() bool {
-	return p.GoogleEnabled || p.GitHubEnabled
-}
+import "github.com/benpsk/go-starter/internal/web/components"
 
 // AccountUser is the narrow view of an account rendered on the account page.
 type AccountUser struct {
@@ -29,7 +18,7 @@ type LinkedProvider struct {
 
 // AccountProps drives the account page.
 type AccountProps struct {
-	PageProps
+	components.PageProps
 	User      AccountUser
 	Providers []LinkedProvider
 }

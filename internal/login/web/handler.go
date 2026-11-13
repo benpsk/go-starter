@@ -1,15 +1,17 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/benpsk/go-starter/internal/apperror"
 	usersession "github.com/benpsk/go-starter/internal/auth/user"
 	"github.com/benpsk/go-starter/internal/config"
 	loginsvc "github.com/benpsk/go-starter/internal/login"
+	transport "github.com/benpsk/go-starter/internal/web"
 	"github.com/benpsk/go-starter/internal/web/components"
-	"github.com/benpsk/go-starter/internal/web/pages"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -24,20 +26,20 @@ const (
 
 // UserLoginHandler drives the browser social sign-in flow.
 type UserLoginHandler struct {
-	svc      loginsvc.Service
+	svc      *loginsvc.Service
 	sessions *usersession.Manager
 	setting  config.Setting
 }
 
 // NewUserLoginHandler wires the login service and session manager together.
-func NewUserLoginHandler(svc loginsvc.Service, sessions *usersession.Manager, setting config.Setting) UserLoginHandler {
+func NewUserLoginHandler(svc *loginsvc.Service, sessions *usersession.Manager, setting config.Setting) UserLoginHandler {
 	return UserLoginHandler{svc: svc, sessions: sessions, setting: setting}
 }
 
 // Show renders the sign-in page, including any failure from a prior attempt.
 func (h UserLoginHandler) Show(w http.ResponseWriter, r *http.Request) {
-	props := components.LoginProps{
-		PageProps: pageProps(h.setting, r, components.Meta{
+	props := LoginProps{
+		PageProps: transport.NewPageProps(h.setting, r, components.Meta{
 			Title:       "Login",
 			Description: "Sign in with Google or GitHub.",
 			Keywords:    "login,oauth,google,github",
@@ -47,7 +49,7 @@ func (h UserLoginHandler) Show(w http.ResponseWriter, r *http.Request) {
 		GoogleEnabled: h.svc.ProviderEnabled(loginsvc.ProviderGoogle),
 		GitHubEnabled: h.svc.ProviderEnabled(loginsvc.ProviderGitHub),
 	}
-	render(w, r, pages.LoginPage(props))
+	transport.Render(w, r, LoginPage(props))
 }
 
 // Start redirects the browser to the provider's authorization screen.
@@ -122,4 +124,11 @@ func safeRedirectPath(target string) string {
 		return defaultPostLoginPath
 	}
 	return trimmed
+}
+
+// isConflict reports whether err is a 409, which the sign-in flow surfaces as
+// an account-linking message rather than a generic failure.
+func isConflict(err error) bool {
+	var appErr *apperror.AppError
+	return errors.As(err, &appErr) && appErr.Kind == apperror.AlreadyExists
 }

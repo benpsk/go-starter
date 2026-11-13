@@ -14,16 +14,18 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/benpsk/go-starter/internal/appsvc"
 	usersession "github.com/benpsk/go-starter/internal/auth/user"
 	"github.com/benpsk/go-starter/internal/config"
 	healthsvc "github.com/benpsk/go-starter/internal/health"
+	healthpg "github.com/benpsk/go-starter/internal/health/postgres"
 	loginsvc "github.com/benpsk/go-starter/internal/login"
+	loginpg "github.com/benpsk/go-starter/internal/login/postgres"
 	"github.com/benpsk/go-starter/internal/postgres"
 	"github.com/benpsk/go-starter/internal/storage"
 	usersvc "github.com/benpsk/go-starter/internal/users"
+	userspg "github.com/benpsk/go-starter/internal/users/postgres"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // App holds the process-wide dependencies.
@@ -80,9 +82,9 @@ func (a *App) Services(ctx context.Context) (appsvc.Services, error) {
 		return appsvc.Services{}, err
 	}
 
-	userService := usersvc.NewService(postgres.NewUserRepository(pool))
+	userService := usersvc.NewService(userspg.NewUserRepository(pool))
 	loginService := loginsvc.NewService(
-		postgres.NewLoginRepository(pool),
+		loginpg.NewLoginRepository(pool),
 		userService,
 		nil,
 		loginsvc.Config{
@@ -105,7 +107,7 @@ func (a *App) Services(ctx context.Context) (appsvc.Services, error) {
 	}
 
 	services := appsvc.Services{
-		Health:  healthsvc.NewService(postgres.NewHealthRepository(pool)),
+		Health:  healthsvc.NewService(healthpg.NewHealthRepository(pool)),
 		Users:   userService,
 		Login:   loginService,
 		Storage: a.newObjectStorage(ctx),

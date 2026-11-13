@@ -1,13 +1,13 @@
 package server
 
 import (
-	"github.com/go-chi/chi/v5"
-
+	"github.com/benpsk/go-starter/internal/appsvc"
 	usersession "github.com/benpsk/go-starter/internal/auth/user"
 	"github.com/benpsk/go-starter/internal/config"
+	"github.com/go-chi/chi/v5"
 )
 
 // NewRouter builds the active router from the internal/server route tree.
-func NewRouter(cfg config.Config, userSessions *usersession.Manager, services Services) chi.Router {
+func NewRouter(cfg config.Config, userSessions *usersession.Manager, services appsvc.Services) chi.Router {
 	return newHTTPRouter(cfg, userSessions, services)
 }

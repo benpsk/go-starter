@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	transport "github.com/benpsk/go-starter/internal/api"
 	"github.com/benpsk/go-starter/internal/apperror"
 	"github.com/benpsk/go-starter/internal/authctx"
 	loginsvc "github.com/benpsk/go-starter/internal/login"
@@ -25,13 +26,13 @@ type LoginAPIConfig struct {
 
 // LoginAPIHandler exposes the JSON authentication endpoints.
 type LoginAPIHandler struct {
-	svc   loginsvc.Service
-	users usersvc.Service
+	svc   *loginsvc.Service
+	users *usersvc.Service
 	cfg   LoginAPIConfig
 }
 
 // NewLoginAPIHandler wires the login and users services into an HTTP handler.
-func NewLoginAPIHandler(svc loginsvc.Service, userService usersvc.Service, cfg LoginAPIConfig) LoginAPIHandler {
+func NewLoginAPIHandler(svc *loginsvc.Service, userService *usersvc.Service, cfg LoginAPIConfig) LoginAPIHandler {
 	return LoginAPIHandler{svc: svc, users: userService, cfg: cfg}
 }
 
@@ -60,83 +61,83 @@ type loginResponse struct {
 // Login completes a client-driven PKCE exchange and returns a token pair.
 func (h LoginAPIHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	if err := transport.DecodeJSON(w, r, &req); err != nil {
 		if errors.Is(err, io.EOF) {
-			Error(w, apperror.BadRequest("request body is required"))
+			transport.Error(w, apperror.BadRequest("request body is required"))
 			return
 		}
-		Error(w, err)
+		transport.Error(w, err)
 		return
 	}
 
 	provider := chi.URLParam(r, "provider")
 	currentUser, err := h.svc.ExchangeCode(r.Context(), provider, req.Code, req.CodeVerifier, req.RedirectURI)
 	if err != nil {
-		Error(w, err)
+		transport.Error(w, err)
 		return
 	}
 
 	tokens, err := h.svc.IssueTokenPair(r.Context(), currentUser.ID, time.Now())
 	if err != nil {
-		Error(w, err)
+		transport.Error(w, err)
 		return
 	}
 	h.setRefreshCookie(w, tokens.RefreshToken, tokens.RefreshTokenExpiresAt)
-	Success(w, http.StatusOK, loginResponse{TokenPair: tokens, User: toUserResponse(currentUser)})
+	transport.Success(w, http.StatusOK, loginResponse{TokenPair: tokens, User: toUserResponse(currentUser)})
 }
 
 // Refresh rotates the refresh token and returns a fresh pair.
 func (h LoginAPIHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	refreshToken, err := h.refreshTokenFromRequest(w, r)
 	if err != nil {
-		Error(w, err)
+		transport.Error(w, err)
 		return
 	}
 	if refreshToken == "" {
-		Error(w, apperror.BadRequest("refresh_token is required"))
+		transport.Error(w, apperror.BadRequest("refresh_token is required"))
 		return
 	}
 
 	tokens, err := h.svc.RotateRefreshToken(r.Context(), refreshToken, time.Now())
 	if err != nil {
 		h.clearRefreshCookie(w)
-		Error(w, err)
+		transport.Error(w, err)
 		return
 	}
 	h.setRefreshCookie(w, tokens.RefreshToken, tokens.RefreshTokenExpiresAt)
-	Success(w, http.StatusOK, tokens)
+	transport.Success(w, http.StatusOK, tokens)
 }
 
 // Logout revokes the presented refresh token. It is idempotent.
 func (h LoginAPIHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	refreshToken, err := h.refreshTokenFromRequest(w, r)
 	if err != nil {
-		Error(w, err)
+		transport.Error(w, err)
 		return
 	}
 	if refreshToken != "" {
 		if err := h.svc.RevokeRefreshToken(r.Context(), refreshToken, time.Now()); err != nil {
-			Error(w, err)
+			transport.Error(w, err)
 			return
 		}
 	}
 	h.clearRefreshCookie(w)
-	Success(w, http.StatusOK, "Logged out successfully")
+	transport.Success(w, http.StatusOK, "Logged out successfully")
 }
 
 // Me returns the authenticated user record.
 func (h LoginAPIHandler) Me(w http.ResponseWriter, r *http.Request) {
 	principal, ok := authctx.UserFromContext(r.Context())
 	if !ok {
-		Error(w, apperror.Unauthorized("unauthorized"))
+		transport.Error(w, apperror.Unauthorized("unauthorized"))
 		return
 	}
 	currentUser, err := h.users.FindByID(r.Context(), principal.ID)
 	if err != nil {
-		Error(w, err)
+		transport.Error(w, err)
 		return
 	}
-	Success(w, http.StatusOK, toUserResponse(currentUser))
+	transport.Success(w, http.StatusOK, toUserResponse(currentUser))
 }
 
 // refreshTokenFromRequest prefers the HttpOnly cookie and falls back to the
@@ -149,7 +150,7 @@ func (h LoginAPIHandler) refreshTokenFromRequest(w http.ResponseWriter, r *http.
 	}
 
 	var req refreshRequest
-	if err := decodeJSON(w, r, &req); err != nil {
+	if err := transport.DecodeJSON(w, r, &req); err != nil {
 		if errors.Is(err, io.EOF) {
 			return "", nil
 		}

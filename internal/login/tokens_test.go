@@ -2,13 +2,10 @@ package login
 
 import (
 	"context"
-	"github.com/benpsk/go-starter/internal/apperror"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/benpsk/go-starter/internal/users"
+	"github.com/benpsk/go-starter/internal/apperror"
 )
 
 func TestIssueTokenPairMintsUsableAccessToken(t *testing.T) {
@@ -52,7 +49,7 @@ func TestIssueTokenPairRequiresConfiguredSecret(t *testing.T) {
 	svc, _ := newTestService(t, cfg, &verifierStub{}, &userServiceStub{})
 
 	if _, err := svc.IssueTokenPair(context.Background(), 1, time.Now()); kindOf(t, err) != apperror.UnavailableDependency {
-		t.Fatalf("expected 503, got %v", err)
+		t.Fatalf("expected an unavailable dependency, got %v", err)
 	}
 }
 
@@ -97,7 +94,7 @@ func TestRotateRefreshTokenReuseRevokesFamily(t *testing.T) {
 	// Replaying the already-rotated token means it leaked, so the whole family
 	// must be revoked rather than just the replayed token.
 	if _, err := svc.RotateRefreshToken(context.Background(), first.RefreshToken, now); kindOf(t, err) != apperror.Unauthenticated {
-		t.Fatalf("expected 401 on reuse, got %v", err)
+		t.Fatalf("expected an unauthenticated error on reuse, got %v", err)
 	}
 	if len(repo.familyRevoked) != 1 {
 		t.Fatalf("expected the token family to be revoked once, got %v", repo.familyRevoked)
@@ -180,7 +177,7 @@ func TestParseAccessTokenRejectsBadTokens(t *testing.T) {
 				t.Fatalf("ParseAccessToken error = %v, wantErr %v", err, tc.wantErr)
 			}
 			if err != nil && kindOf(t, err) != apperror.Unauthenticated {
-				t.Fatalf("expected 401, got %v", err)
+				t.Fatalf("expected an unauthenticated error, got %v", err)
 			}
 		})
 	}
@@ -198,36 +195,8 @@ func TestHashTokenIsStableAndTrims(t *testing.T) {
 	}
 }
 
-func TestBearerTokenFromRequest(t *testing.T) {
-	cases := []struct {
-		name   string
-		header string
-		want   string
-	}{
-		{"bearer", "Bearer abc123", "abc123"},
-		{"lowercase scheme", "bearer abc123", "abc123"},
-		{"basic is not bearer", "Basic abc123", ""},
-		{"empty", "", ""},
-		{"scheme only", "Bearer", ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodGet, "/", nil)
-			if tc.header != "" {
-				r.Header.Set("Authorization", tc.header)
-			}
-			if got := BearerTokenFromRequest(r); got != tc.want {
-				t.Fatalf("BearerTokenFromRequest() = %q, want %q", got, tc.want)
-			}
-		})
-	}
-	if got := BearerTokenFromRequest(nil); got != "" {
-		t.Fatalf("expected empty for a nil request, got %q", got)
-	}
-}
-
 // compile-time assertion that the stub satisfies the domain interface
-var _ users.Service = (*userServiceStub)(nil)
+var _ UserResolver = (*userServiceStub)(nil)
 
 func TestPruneRefreshTokens(t *testing.T) {
 	svc, repo := newTestService(t, testConfig(), &verifierStub{}, &userServiceStub{})
@@ -264,7 +233,7 @@ func TestPruneRefreshTokensRejectsANegativeGrace(t *testing.T) {
 	svc, _ := newTestService(t, testConfig(), &verifierStub{}, &userServiceStub{})
 
 	if _, err := svc.PruneRefreshTokens(context.Background(), -time.Hour, time.Now()); kindOf(t, err) != apperror.Invalid {
-		t.Fatalf("expected 400, got %v", err)
+		t.Fatalf("expected invalid input, got %v", err)
 	}
 }
 

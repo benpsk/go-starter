@@ -68,8 +68,8 @@ func toJSON(w http.ResponseWriter, code int, payload any) {
 	_, _ = w.Write(body)
 }
 
-// render writes a templ component as a 200 HTML response.
-func render(w http.ResponseWriter, r *http.Request, component templ.Component) {
+// Render writes a templ component as a 200 HTML response.
+func Render(w http.ResponseWriter, r *http.Request, component templ.Component) {
 	renderStatus(w, r, http.StatusOK, component)
 }
 
@@ -82,9 +82,9 @@ func renderStatus(w http.ResponseWriter, r *http.Request, status int, component 
 	}
 }
 
-// pageProps assembles the base props every page needs: the render-time
+// NewPageProps assembles the base props every page needs: the render-time
 // settings, the page metadata, and the header's view of the current session.
-func pageProps(setting config.Setting, r *http.Request, meta components.Meta) components.PageProps {
+func NewPageProps(setting config.Setting, r *http.Request, meta components.Meta) components.PageProps {
 	return components.PageProps{
 		Setting: setting,
 		Meta:    meta,
@@ -109,11 +109,4 @@ func headerAuthProps(r *http.Request) components.HeaderAuthProps {
 		DisplayName:     name,
 		AvatarURL:       principal.AvatarURL,
 	}
-}
-
-// isConflict reports whether err is a 409, which the sign-in flow surfaces as
-// an account-linking message rather than a generic failure.
-func isConflict(err error) bool {
-	var appErr *apperror.AppError
-	return errors.As(err, &appErr) && appErr.Kind == apperror.AlreadyExists
 }

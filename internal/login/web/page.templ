@@ -1,0 +1,43 @@
+package web
+
+import "github.com/benpsk/go-starter/internal/web/components"
+
+templ LoginPage(props LoginProps) {
+	@components.Layout(props.PageProps, LoginContent(props))
+}
+
+templ LoginContent(props LoginProps) {
+	<section class="pb-6 pt-10 sm:pt-14">
+		<div class="mx-auto max-w-xl rounded-3xl border border-base-300/60 bg-base-100/90 p-8 shadow-xl">
+			<p class="badge badge-outline">Auth</p>
+			<h1 class="mt-4 text-3xl font-black tracking-tight sm:text-4xl">Sign in</h1>
+			<p class="mt-3 text-base-content/70">Use your social account to continue.</p>
+			if props.Error != "" {
+				<div class="alert alert-error mt-5">
+					<span>{ props.Error }</span>
+				</div>
+			}
+			<div class="mt-6 grid gap-3">
+				if props.GoogleEnabled {
+					<form method="post" action="/auth/login/google">
+						<button type="submit" class="btn w-full justify-start">
+							<span>Continue with Google</span>
+						</button>
+					</form>
+				}
+				if props.GitHubEnabled {
+					<form method="post" action="/auth/login/github">
+						<button type="submit" class="btn w-full justify-start">
+							<span>Continue with GitHub</span>
+						</button>
+					</form>
+				}
+				if !props.AnyProviderEnabled() {
+					<div class="alert mt-2">
+						<span>No social providers are configured yet. Set the OAuth env vars in <code>.env</code>.</span>
+					</div>
+				}
+			</div>
+		</div>
+	</section>
+}

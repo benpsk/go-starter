@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"github.com/benpsk/go-starter/internal/api"
-	"github.com/benpsk/go-starter/internal/appsvc"
 	"github.com/benpsk/go-starter/internal/config"
 	loginsvc "github.com/benpsk/go-starter/internal/login"
-	"github.com/benpsk/go-starter/internal/postgres"
-	"github.com/benpsk/go-starter/internal/storage"
+	loginapi "github.com/benpsk/go-starter/internal/login/api"
+	loginpg "github.com/benpsk/go-starter/internal/login/postgres"
 	"github.com/benpsk/go-starter/internal/testutil"
 	usersvc "github.com/benpsk/go-starter/internal/users"
+	userspg "github.com/benpsk/go-starter/internal/users/postgres"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -72,9 +72,9 @@ func newAPI(t *testing.T, verifier loginsvc.SocialVerifier) (http.Handler, conte
 	ctx, done := testutil.WithTx(t, pool)
 
 	cfg := apiTestConfig()
-	userService := usersvc.NewService(postgres.NewUserRepository(pool))
+	userService := usersvc.NewService(userspg.NewUserRepository(pool))
 	loginService := loginsvc.NewService(
-		postgres.NewLoginRepository(pool),
+		loginpg.NewLoginRepository(pool),
 		userService,
 		verifier,
 		loginsvc.Config{
@@ -90,10 +90,8 @@ func newAPI(t *testing.T, verifier loginsvc.SocialVerifier) (http.Handler, conte
 	)
 
 	r := chi.NewRouter()
-	api.Mount(r, cfg, appsvc.Services{
-		Users:   userService,
-		Login:   loginService,
-		Storage: storage.NewDisabledService("not configured in tests"),
+	api.Mount(r, func(apiRouter chi.Router) {
+		loginapi.Mount(apiRouter, cfg, loginService, userService)
 	})
 	return r, ctx, done
 }

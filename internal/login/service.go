@@ -14,35 +14,9 @@ import (
 	"github.com/benpsk/go-starter/internal/users"
 )
 
-// Service exposes the authentication operations both transports need.
-type Service interface {
-	// ProviderConfig returns the client credentials for a provider name.
-	ProviderConfig(provider string) (OAuthProviderConfig, bool)
-	// ProviderEnabled reports whether a provider is fully configured.
-	ProviderEnabled(provider string) bool
-	// APITokensConfigured reports whether JWT access tokens can be signed.
-	APITokensConfigured() bool
-	// CallbackURL is the redirect_uri this application registers with a provider.
-	CallbackURL(provider string) string
-
-	// StartOAuth creates a PKCE flow and returns where to send the browser.
-	StartOAuth(provider, redirectTo string, now time.Time) (OAuthStart, error)
-	// CompleteOAuth consumes a browser callback and resolves the account.
-	CompleteOAuth(ctx context.Context, provider, state, code string, now time.Time) (CompletedLogin, error)
-	// ExchangeCode completes a client-driven PKCE exchange (native clients).
-	ExchangeCode(ctx context.Context, provider, code, codeVerifier, redirectURI string) (users.User, error)
-
-	// IssueTokenPair mints a fresh access and refresh token for a user.
-	IssueTokenPair(ctx context.Context, userID int64, now time.Time) (TokenPair, error)
-	// RotateRefreshToken exchanges a refresh token for a new pair.
-	RotateRefreshToken(ctx context.Context, refreshToken string, now time.Time) (TokenPair, error)
-	// RevokeRefreshToken invalidates a single refresh token.
-	RevokeRefreshToken(ctx context.Context, refreshToken string, now time.Time) error
-	// ParseAccessToken validates a bearer token and returns its claims.
-	ParseAccessToken(token string) (AccessTokenClaims, error)
-	// PruneRefreshTokens removes refresh tokens that expired or were revoked
-	// more than olderThan ago, and reports how many were removed.
-	PruneRefreshTokens(ctx context.Context, olderThan time.Duration, now time.Time) (int64, error)
+// UserResolver resolves verified social profiles to application accounts.
+type UserResolver interface {
+	ResolveSocialProfile(context.Context, users.SocialProfile) (users.User, error)
 }
 
 // Repository abstracts persistence for API refresh tokens.
@@ -88,9 +62,10 @@ type CompletedLogin struct {
 	RedirectTo string
 }
 
-type service struct {
+// Service implements the login application operations.
+type Service struct {
 	repo     Repository
-	users    users.Service
+	users    UserResolver
 	verifier SocialVerifier
 	flows    *oauthFlowStore
 	cfg      Config
@@ -98,7 +73,7 @@ type service struct {
 
 // NewService constructs a login service. The verifier is optional; nil selects
 // the real HTTP-backed provider verifier.
-func NewService(repo Repository, userService users.Service, verifier SocialVerifier, cfg Config) Service {
+func NewService(repo Repository, userService UserResolver, verifier SocialVerifier, cfg Config) *Service {
 	if cfg.AccessTokenTTL <= 0 {
 		cfg.AccessTokenTTL = 10 * time.Minute
 	}
@@ -111,7 +86,7 @@ func NewService(repo Repository, userService users.Service, verifier SocialVerif
 	if verifier == nil {
 		verifier = NewSocialVerifier()
 	}
-	return &service{
+	return &Service{
 		repo:     repo,
 		users:    userService,
 		verifier: verifier,
@@ -121,7 +96,7 @@ func NewService(repo Repository, userService users.Service, verifier SocialVerif
 }
 
 // ProviderConfig returns the credentials registered for a provider name.
-func (s *service) ProviderConfig(provider string) (OAuthProviderConfig, bool) {
+func (s *Service) ProviderConfig(provider string) (OAuthProviderConfig, bool) {
 	switch normalizeProvider(provider) {
 	case ProviderGoogle:
 		return s.cfg.Google, true
@@ -133,24 +108,24 @@ func (s *service) ProviderConfig(provider string) (OAuthProviderConfig, bool) {
 }
 
 // ProviderEnabled reports whether a provider can be used for sign-in.
-func (s *service) ProviderEnabled(provider string) bool {
+func (s *Service) ProviderEnabled(provider string) bool {
 	cfg, ok := s.ProviderConfig(provider)
 	return ok && cfg.Enabled()
 }
 
 // APITokensConfigured reports whether an access token signing key is present.
-func (s *service) APITokensConfigured() bool {
+func (s *Service) APITokensConfigured() bool {
 	return strings.TrimSpace(s.cfg.AccessTokenSecret) != ""
 }
 
 // CallbackURL builds the absolute redirect_uri for a provider.
-func (s *service) CallbackURL(provider string) string {
+func (s *Service) CallbackURL(provider string) string {
 	base := strings.TrimRight(strings.TrimSpace(s.cfg.AppURL), "/")
 	return base + "/auth/callback/" + normalizeProvider(provider)
 }
 
 // StartOAuth records a PKCE flow and returns the provider authorization URL.
-func (s *service) StartOAuth(provider, redirectTo string, now time.Time) (OAuthStart, error) {
+func (s *Service) StartOAuth(provider, redirectTo string, now time.Time) (OAuthStart, error) {
 	provider = normalizeProvider(provider)
 	cfg, ok := s.ProviderConfig(provider)
 	if !ok || !cfg.Enabled() {
@@ -168,7 +143,7 @@ func (s *service) StartOAuth(provider, redirectTo string, now time.Time) (OAuthS
 
 // CompleteOAuth validates the callback state, exchanges the code, and resolves
 // the account the verified profile belongs to.
-func (s *service) CompleteOAuth(ctx context.Context, provider, state, code string, now time.Time) (CompletedLogin, error) {
+func (s *Service) CompleteOAuth(ctx context.Context, provider, state, code string, now time.Time) (CompletedLogin, error) {
 	provider = normalizeProvider(provider)
 	if strings.TrimSpace(code) == "" || strings.TrimSpace(state) == "" {
 		return CompletedLogin{}, apperror.BadRequest("code and state are required")
@@ -194,7 +169,7 @@ func (s *service) CompleteOAuth(ctx context.Context, provider, state, code strin
 
 // ExchangeCode completes a PKCE exchange the client itself started, which is
 // how native clients sign in.
-func (s *service) ExchangeCode(ctx context.Context, provider, code, codeVerifier, redirectURI string) (users.User, error) {
+func (s *Service) ExchangeCode(ctx context.Context, provider, code, codeVerifier, redirectURI string) (users.User, error) {
 	provider = normalizeProvider(provider)
 	cfg, ok := s.ProviderConfig(provider)
 	if !ok || !cfg.Enabled() {
@@ -214,7 +189,7 @@ func (s *service) ExchangeCode(ctx context.Context, provider, code, codeVerifier
 	return s.users.ResolveSocialProfile(ctx, profile)
 }
 
-func (s *service) authorizationURL(provider string, cfg OAuthProviderConfig, flow oauthFlow) string {
+func (s *Service) authorizationURL(provider string, cfg OAuthProviderConfig, flow oauthFlow) string {
 	q := url.Values{}
 	q.Set("client_id", cfg.ClientID)
 	q.Set("redirect_uri", s.CallbackURL(provider))

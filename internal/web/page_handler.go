@@ -20,22 +20,22 @@ func NewPageHandler(setting config.Setting) PageHandler {
 
 // Home renders the landing page.
 func (h PageHandler) Home(w http.ResponseWriter, r *http.Request) {
-	props := pageProps(h.setting, r, components.Meta{
+	props := NewPageProps(h.setting, r, components.Meta{
 		Title:       h.setting.AppName,
 		Description: "Minimal Go starter with chi, pgx, templ, Tailwind, DaisyUI, htmx, and Chart.js.",
 		Keywords:    "go starter,chi,pgx,templ,tailwind,daisyui,htmx,chartjs",
 		Path:        "/",
 	})
 	if IsHtmx(r) {
-		render(w, r, components.Content(props.FullTitle(), pages.HomeContent()))
+		Render(w, r, components.Content(props.FullTitle(), pages.HomeContent()))
 		return
 	}
-	render(w, r, pages.HomePage(props))
+	Render(w, r, pages.HomePage(props))
 }
 
 // About renders the about page.
 func (h PageHandler) About(w http.ResponseWriter, r *http.Request) {
-	props := pageProps(h.setting, r, components.Meta{
+	props := NewPageProps(h.setting, r, components.Meta{
 		Title:       "About",
 		Description: "About the Go Starter template and the structure it follows.",
 		Keywords:    "go starter about",
@@ -43,15 +43,15 @@ func (h PageHandler) About(w http.ResponseWriter, r *http.Request) {
 		Type:        "article",
 	})
 	if IsHtmx(r) {
-		render(w, r, components.Content(props.FullTitle(), pages.AboutContent()))
+		Render(w, r, components.Content(props.FullTitle(), pages.AboutContent()))
 		return
 	}
-	render(w, r, pages.AboutPage(props))
+	Render(w, r, pages.AboutPage(props))
 }
 
 // NotFound renders the 404 page.
 func (h PageHandler) NotFound(w http.ResponseWriter, r *http.Request) {
-	props := pageProps(h.setting, r, components.Meta{
+	props := NewPageProps(h.setting, r, components.Meta{
 		Title:       "Page Not Found",
 		Description: "The requested page could not be found.",
 		Keywords:    "404,not found",
@@ -66,7 +66,7 @@ func (h PageHandler) NotFound(w http.ResponseWriter, r *http.Request) {
 
 // MethodNotAllowed renders the 405 page.
 func (h PageHandler) MethodNotAllowed(w http.ResponseWriter, r *http.Request) {
-	props := pageProps(h.setting, r, components.Meta{
+	props := NewPageProps(h.setting, r, components.Meta{
 		Title:       "Method Not Allowed",
 		Description: "The HTTP method is not allowed for this route.",
 		Keywords:    "405,method not allowed",

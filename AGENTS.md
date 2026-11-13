@@ -6,65 +6,72 @@ package boundaries clear.
 
 ## Project Structure & Module Organization
 
-- `cmd/app`: the single entrypoint. It dispatches argv to a command and maps the
-  outcome to an exit code. It registers `serve`, and nothing else.
-- `internal/app`: **the composition root** — the only place repositories and
-  services are constructed. Built lazily so each command pays only for what it
-  uses.
-- `internal/console`: the command transport (`db:*`, `cron:*`, `help`,
-  `version`). Serves argv the way `web` serves browsers.
-- `internal/server`: the HTTP composition layer — global middleware, static
-  files, health endpoints, and route mounting. Nothing else.
-- `internal/appsvc`: the `Services` aggregate passed to the transports.
-- `internal/<domain>`: domain services (`users`, `login`, `health`, ...).
-- `internal/postgres`: PostgreSQL data access and migration helpers.
-- `internal/web`: browser routes, handlers, templ pages/components, web assets.
-- `internal/api`: JSON API routes and handlers.
-- `internal/apperror`, `internal/ratelimit`, `internal/authctx`,
-  `internal/storage`: cross-cutting packages shared by more than one caller.
-- `internal/auth/user`: browser session cookie manager.
-- `internal/testutil`: test scaffolding (`.env.test`, schema setup, `WithTx`).
-- `db/migrations`, `db/seeders`: raw SQL scripts, embedded into the binaries.
-- `static/`: built CSS/JS and vendored browser files served by the app.
-- `pkg/`: shared utilities usable outside this module (e.g. pagination).
+Organize by business feature under `internal/<feature>`. Each feature is a
+normal collection of Go packages within the single root `go.mod`.
 
-Keep API and server-rendered web flows distinct. Do not mix API response
-contracts with web page data unless they are intentionally shared.
+- `cmd/app`: single entrypoint; dispatches commands and registers `serve`.
+- `internal/app`: composition root; lazily constructs repositories and services.
+- `internal/appsvc`: concrete service aggregate passed to the composition layer.
+- `internal/console`: command transport (`db:*`, `cron:*`, `help`, `version`).
+- `internal/server`: HTTP lifecycle, global middleware, static files, and feature
+  route mounting. Feature handlers live with their features.
+- `internal/<feature>`: models, concrete `Service`, business rules, domain
+  errors, and the `Repository` interface consumed by that service.
+- `internal/<feature>/postgres`: SQL repository implementation and database tests.
+- `internal/<feature>/api`: JSON handlers, request/response types, routes, and
+  feature-specific middleware and tests.
+- `internal/<feature>/web`: browser handlers, routes, page props, templ files,
+  and browser feature tests. Create only the adapters a feature actually needs.
+- `internal/postgres`: shared connection, querier, transaction, and migration
+  infrastructure. No feature repositories.
+- `internal/api`: shared API envelope, request parsing, and common API routing.
+- `internal/web`: shared browser middleware, rendering, layouts, components,
+  assets, and the static home/about/error pages.
+- `internal/auth/user`: browser session cookie manager.
+- `internal/apperror`, `internal/httperror`, `internal/ratelimit`,
+  `internal/authctx`, `internal/storage`: shared infrastructure.
+- `internal/testutil`: test scaffolding (`.env.test`, schema setup, transactions).
+- `db/migrations`, `db/seeders`: raw SQL scripts embedded into the binary.
+- `static`: built CSS/JS and vendored browser files.
+- `pkg`: utilities usable outside this application, such as pagination.
 
 ## Package Boundaries
 
-- Keep `internal/server` small. It composes global middleware, static files,
-  health checks, and the mounted routers.
-- Keep domain packages transport-free **and database-free**. `internal/products`
-  holds product models, a `Service` interface, business rules, and a
-  `Repository` interface — never HTTP handlers or SQL.
-- Declare the `Repository` interface in the **domain** package that needs it.
-  `internal/postgres` implements it and returns domain types.
-- Repositories take `postgres.Querier`, not `*pgxpool.Pool`, so the same code
-  runs against the pool in production and inside a test transaction.
-- Put JSON API routes/handlers in `internal/api`, e.g. `products_routes.go` and
-  `products_api_handler.go`.
-- Put browser routes/handlers in `internal/web`, e.g. `products_routes.go` and
-  `products_handler.go`.
-- Put middleware near the transport that uses it: API-only middleware in
-  `internal/api`, web-only middleware in `internal/web`, and truly global
-  middleware in `internal/server`.
+- Feature root packages import neither their adapters nor database drivers.
+  Adapters import the feature root; `internal/app` constructs their dependencies.
+- Return concrete service types. Define narrow interfaces in consuming packages
+  when a dependency needs an abstraction, including cross-feature dependencies.
+- Declare repository interfaces in the feature that consumes them. Implement
+  them in that feature's `postgres` subpackage and return domain types.
+- Repositories take the shared `postgres.Querier`, allowing a pool or transaction.
+- HTTP handlers parse requests and map responses; services enforce business rules;
+  repositories implement persistence. API contracts and browser page props stay
+  distinct, even when both call the same service.
+- Feature route functions receive only their required services. Shared transport
+  packages never import feature adapters or the application service aggregate.
+- Middleware lives with its consumer: feature-specific middleware in its adapter,
+  common transport middleware in `internal/api` or `internal/web`, and global
+  HTTP middleware in `internal/server`.
+- Construct production services only in `internal/app`. Tests construct the
+  smallest real dependency graph needed for the behavior under test.
 - Promote code to a shared package only when more than one package needs it.
-- Never construct a service outside `cmd/*`. If a handler needs something new,
-  add a field to `appsvc.Services` and wire it in `cmd/app/main.go`.
+- Split by business responsibility and dependency boundaries, not file count.
+  Do not add empty adapter packages, generic repositories, or a separate go.mod
+  for every feature.
 
-### Adding a domain, end to end
+### Adding a feature, end to end
 
-1. `internal/products/service.go` — models, `Service`, `Repository`, `service`,
-   `NewService`.
-2. `internal/postgres/products.go` — `ProductRepository` over `Querier`,
-   returning `products.Product`.
-3. `internal/appsvc/appsvc.go` — add `Products productsvc.Service`.
-4. `cmd/app/main.go` — build the repository, build the service, assign it.
-5. `internal/api/products_api_handler.go` + routes in `internal/api/routes.go`,
-   and/or `internal/web/products_handler.go` + routes in `internal/web/routes.go`.
-6. Tests: a service test with a repository stub, a repository test against the
-   real database, and a feature test through the router.
+1. `internal/products/service.go`: models, concrete service, repository contract.
+2. `internal/products/postgres/repository.go`: SQL implementation over the shared
+   `postgres.Querier`.
+3. `internal/appsvc/appsvc.go`: add `Products *products.Service`.
+4. `internal/app/app.go`: construct the repository and service.
+5. `internal/products/api` and/or `internal/products/web`: handlers and a `Mount`
+   function. Register it in `internal/server/http_router.go` within the common
+   API or browser router, so it inherits the appropriate middleware.
+6. Add service tests with repository stubs, real repository tests, and selected
+   module feature tests. Reserve full-application tests for routing and important
+   cross-feature behavior.
 
 ## Build, Test, and Development Commands
 
@@ -106,8 +113,9 @@ contracts with web page data unless they are intentionally shared.
   struct field an explicit `json:"snake_case_name"` tag instead of relying on
   Go's default field-name encoding.
 - Follow `plans/api.md` for the response envelope and pagination contract.
-- Return errors as `*apperror.AppError` from services, and render them with
-  `api.Error` / `web.Error`. Handlers do not choose status codes ad hoc.
+- Return errors as `*apperror.AppError` from services, describing failures with
+  semantic kinds. Render them with `api.Error` / `web.Error`; HTTP status mapping
+  lives in `internal/httperror`.
 - Wrap success payloads with `api.Success`, which enforces the `{"data": ...}`
   envelope.
 - Validate incoming data before calling a service; centralise request parsing in
@@ -123,15 +131,26 @@ contracts with web page data unless they are intentionally shared.
 - Use DaisyUI for every UI component, icon, and theme. Reach for raw Tailwind
   only when DaisyUI has no built-in.
 - Chart.js for charts and bars.
-- Page props live in `internal/web/components/*_data.go` as `XxxProps` embedding
-  `PageProps`. Handlers map domain types onto narrow view types; templ files take
+- Feature page props live beside their templates in
+  `internal/<feature>/web/*_data.go` as `XxxProps` embedding the shared
+  `components.PageProps`. Shared props live in `internal/web/components`.
+  Handlers map domain types onto narrow view types; templ files take
   one props argument, never a growing list of scalars.
 - Frontend builds use the Tailwind CLI and esbuild via `package.json`; generated
   assets go under `static/`.
 
 ## Testing Guidelines
 
-- Mainly write feature tests, including the database and everything else.
+- Test business variations in feature service tests using repository stubs.
+- Test SQL, constraints, and transaction behavior against real PostgreSQL.
+- Feature tests construct only their required modules, services, and middleware;
+  do not boot the entire application to test one feature. Reserve full router
+  tests for shared middleware, route composition, and cross-feature behavior.
+- Run `go test ./internal/users` for business tests and
+  `go test ./internal/users/...` for the full users feature. The same pattern
+  applies to login and health. Keep race checks separate from the normal suite.
+- Prepare the schema once per test binary and use rollback for ordinary cases;
+  never rebuild the schema for each test.
 - Don't mock services or the database. A stub implementing a domain
   `Repository` interface is fine — that is a test double for a contract, not a
   fake database.

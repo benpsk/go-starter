@@ -14,5 +14,6 @@
   transition: width 0.2s ease, opacity 0.2s ease;
 }
 
-@source "../**/*.go";
+@source "../../**/*.go";
+@source "../../**/*.templ";
 @source "../**/*.js";

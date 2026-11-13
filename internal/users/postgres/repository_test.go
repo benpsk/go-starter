@@ -4,9 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/benpsk/go-starter/internal/postgres"
 	"github.com/benpsk/go-starter/internal/testutil"
 	"github.com/benpsk/go-starter/internal/users"
+	userspg "github.com/benpsk/go-starter/internal/users/postgres"
 )
 
 func googleProfile() users.SocialProfile {
@@ -25,7 +25,7 @@ func TestUserRepositoryCreateWithIdentity(t *testing.T) {
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
 
-	repo := postgres.NewUserRepository(pool)
+	repo := userspg.NewUserRepository(pool)
 	profile := googleProfile()
 
 	created, err := repo.CreateWithIdentity(ctx, profile)
@@ -80,7 +80,7 @@ func TestUserRepositoryCreateWithIdentityRejectsDuplicateEmail(t *testing.T) {
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
 
-	repo := postgres.NewUserRepository(pool)
+	repo := userspg.NewUserRepository(pool)
 	if _, err := repo.CreateWithIdentity(ctx, googleProfile()); err != nil {
 		t.Fatalf("first insert failed: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestUserRepositoryCreateWithIdentityRejectsDuplicateIdentity(t *testing.T) 
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
 
-	repo := postgres.NewUserRepository(pool)
+	repo := userspg.NewUserRepository(pool)
 	if _, err := repo.CreateWithIdentity(ctx, googleProfile()); err != nil {
 		t.Fatalf("first insert failed: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestUserRepositoryCreateWithIdentityAllowsMissingEmail(t *testing.T) {
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
 
-	repo := postgres.NewUserRepository(pool)
+	repo := userspg.NewUserRepository(pool)
 
 	first, err := repo.CreateWithIdentity(ctx, users.SocialProfile{
 		Provider:       "github",
@@ -150,7 +150,7 @@ func TestUserRepositoryCreateWithIdentityValidatesProfile(t *testing.T) {
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
 
-	repo := postgres.NewUserRepository(pool)
+	repo := userspg.NewUserRepository(pool)
 
 	if _, err := repo.CreateWithIdentity(ctx, users.SocialProfile{Provider: "google"}); err == nil {
 		t.Fatalf("expected an incomplete profile to be rejected")
@@ -162,7 +162,7 @@ func TestUserRepositoryUpdateFromProfile(t *testing.T) {
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
 
-	repo := postgres.NewUserRepository(pool)
+	repo := userspg.NewUserRepository(pool)
 	created, err := repo.CreateWithIdentity(ctx, googleProfile())
 	if err != nil {
 		t.Fatalf("CreateWithIdentity failed: %v", err)
@@ -207,7 +207,7 @@ func TestUserRepositoryLookupMisses(t *testing.T) {
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
 
-	repo := postgres.NewUserRepository(pool)
+	repo := userspg.NewUserRepository(pool)
 
 	cases := []struct {
 		name string
@@ -232,7 +232,7 @@ func TestUserRepositoryListIdentitiesIsEmptyForUnknownUser(t *testing.T) {
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
 
-	identities, err := postgres.NewUserRepository(pool).ListIdentitiesByUserID(ctx, 999999)
+	identities, err := userspg.NewUserRepository(pool).ListIdentitiesByUserID(ctx, 999999)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -242,4 +242,4 @@ func TestUserRepositoryListIdentitiesIsEmptyForUnknownUser(t *testing.T) {
 }
 
 // compile-time assertion that the repository satisfies the domain contract
-var _ users.Repository = (*postgres.UserRepository)(nil)
+var _ users.Repository = (*userspg.UserRepository)(nil)

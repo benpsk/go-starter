@@ -9,7 +9,7 @@ COVER_HTML ?= tmp/coverage-core.html
 COVERAGE_MIN ?= 80.00
 # Generated and wiring-only code is excluded from the coverage scope.
 COVER_EXCLUDE_PKG_RE := ^github.com/benpsk/go-starter/cmd/|^github.com/benpsk/go-starter/static($$|/)|^github.com/benpsk/go-starter/internal/testutil($$|/)
-COVER_EXCLUDE_FILE_RE := /internal/web/.+_templ\.go:|/static/
+COVER_EXCLUDE_FILE_RE := /internal/.+_templ\.go:|/static/
 # With -coverpkg every test binary emits a block for every package, so the raw
 # profile holds duplicates. Merge them by keeping the highest count per block,
 # otherwise `go tool cover` counts each copy separately and understates totals.

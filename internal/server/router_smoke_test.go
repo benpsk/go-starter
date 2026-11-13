@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/benpsk/go-starter/internal/appsvc"
 	usersession "github.com/benpsk/go-starter/internal/auth/user"
 	"github.com/benpsk/go-starter/internal/config"
 	healthsvc "github.com/benpsk/go-starter/internal/health"
@@ -20,7 +21,7 @@ import (
 
 // The route tree is exercised end to end with in-memory repositories, so this
 // covers global middleware, mounting, and the transport split without needing a
-// database. The repositories' own SQL is covered in internal/postgres.
+// database. The repositories' own SQL is covered in each feature's postgres package.
 
 type healthRepoStub struct{ err error }
 
@@ -90,7 +91,7 @@ func testRouter(t *testing.T, healthErr error) http.Handler {
 	}
 
 	userService := usersvc.NewService(userRepoStub{})
-	services := Services{
+	services := appsvc.Services{
 		Health:  healthsvc.NewService(healthRepoStub{err: healthErr}),
 		Users:   userService,
 		Login:   loginsvc.NewService(loginRepoStub{}, userService, nil, loginsvc.Config{AppURL: cfg.AppURL, AccessTokenSecret: "test-secret"}),

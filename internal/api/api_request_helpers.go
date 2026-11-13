@@ -12,10 +12,10 @@ import (
 // defaultRequestBodyLimitBytes caps how much JSON a handler will read.
 const defaultRequestBodyLimitBytes = 1 << 20 // 1 MiB
 
-// decodeJSON reads a size-limited JSON body into dst. It returns an
+// DecodeJSON reads a size-limited JSON body into dst. It returns an
 // *apperror.AppError ready to hand to Error, or io.EOF for an empty body so
 // callers can treat a missing body as optional.
-func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, defaultRequestBodyLimitBytes)
 
 	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {

@@ -1,9 +1,6 @@
-// Package appsvc holds the aggregate of domain services the HTTP transports
-// consume.
-//
-// It lives in its own package so internal/web and internal/api can receive the
-// aggregate without importing internal/server, which would create an import
-// cycle. internal/server re-exports it as server.Services.
+// Package appsvc holds the concrete service aggregate used by application
+// construction and HTTP route composition. Feature adapters receive only
+// their individual dependencies.
 package appsvc
 
 import (
@@ -13,13 +10,13 @@ import (
 	usersvc "github.com/benpsk/go-starter/internal/users"
 )
 
-// Services aggregates the services built in cmd/app and consumed by handlers.
+// Services aggregates the services built in internal/app and consumed by handlers.
 // Add one field per domain; handlers take only the services they use, never the
 // whole aggregate.
 type Services struct {
-	Health healthsvc.Service
-	Users  usersvc.Service
-	Login  loginsvc.Service
+	Health *healthsvc.Service
+	Users  *usersvc.Service
+	Login  *loginsvc.Service
 	// Storage is the configured object store. Domain services that persist
 	// files take it as a constructor dependency.
 	Storage storage.Service

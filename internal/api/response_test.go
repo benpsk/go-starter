@@ -7,12 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/benpsk/go-starter/internal/api"
 	"github.com/benpsk/go-starter/internal/apperror"
-	"github.com/benpsk/go-starter/internal/appsvc"
-	"github.com/benpsk/go-starter/internal/config"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -159,11 +156,9 @@ func TestAPIRouterErrorsUseEnvelope(t *testing.T) {
 
 func testAPIRouter() http.Handler {
 	r := chi.NewRouter()
-	api.Mount(r, config.Config{
-		AppURL: "http://127.0.0.1:8080", AppEnv: "test",
-		Auth:      config.AuthConfig{API: config.APIAuthConfig{RefreshCookieName: "refresh"}},
-		RateLimit: config.RateLimitConfig{Window: time.Minute, APILogin: 100, APIRefresh: 100},
-	}, appsvc.Services{})
+	api.Mount(r, func(r chi.Router) {
+		r.Post("/auth/logout", func(w http.ResponseWriter, _ *http.Request) { api.Success(w, http.StatusOK, "Logged out successfully") })
+	})
 	return r
 }
 

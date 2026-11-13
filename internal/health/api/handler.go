@@ -1,4 +1,4 @@
-package server
+package api
 
 import (
 	"encoding/json"
@@ -10,11 +10,11 @@ import (
 
 // HealthHandler exposes the liveness and readiness endpoints.
 type HealthHandler struct {
-	svc healthsvc.Service
+	svc *healthsvc.Service
 }
 
 // NewHealthHandler wires a health service into a handler instance.
-func NewHealthHandler(svc healthsvc.Service) HealthHandler {
+func NewHealthHandler(svc *healthsvc.Service) HealthHandler {
 	return HealthHandler{svc: svc}
 }
 

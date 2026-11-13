@@ -5,9 +5,10 @@ import (
 	"time"
 
 	loginsvc "github.com/benpsk/go-starter/internal/login"
-	"github.com/benpsk/go-starter/internal/postgres"
+	loginpg "github.com/benpsk/go-starter/internal/login/postgres"
 	"github.com/benpsk/go-starter/internal/testutil"
 	"github.com/benpsk/go-starter/internal/users"
+	userspg "github.com/benpsk/go-starter/internal/users/postgres"
 )
 
 func TestLoginRepositoryRotateRefreshToken(t *testing.T) {
@@ -15,7 +16,7 @@ func TestLoginRepositoryRotateRefreshToken(t *testing.T) {
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
 
-	owner, err := postgres.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
+	owner, err := userspg.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
 		Provider:       "google",
 		ProviderUserID: "g-token-1",
 		Email:          "token@example.com",
@@ -25,7 +26,7 @@ func TestLoginRepositoryRotateRefreshToken(t *testing.T) {
 		t.Fatalf("seed user: %v", err)
 	}
 
-	repo := postgres.NewLoginRepository(pool)
+	repo := loginpg.NewLoginRepository(pool)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	if err := repo.CreateRefreshToken(ctx, loginsvc.RefreshToken{
@@ -77,7 +78,7 @@ func TestLoginRepositoryRotateDetectsReuseAndRevokesFamily(t *testing.T) {
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
 
-	owner, err := postgres.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
+	owner, err := userspg.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
 		Provider:       "google",
 		ProviderUserID: "g-token-2",
 		Email:          "reuse@example.com",
@@ -86,7 +87,7 @@ func TestLoginRepositoryRotateDetectsReuseAndRevokesFamily(t *testing.T) {
 		t.Fatalf("seed user: %v", err)
 	}
 
-	repo := postgres.NewLoginRepository(pool)
+	repo := loginpg.NewLoginRepository(pool)
 	now := time.Now().UTC()
 
 	if err := repo.CreateRefreshToken(ctx, loginsvc.RefreshToken{
@@ -139,7 +140,7 @@ func TestLoginRepositoryRotateRejectsUnknownAndExpired(t *testing.T) {
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
 
-	owner, err := postgres.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
+	owner, err := userspg.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
 		Provider:       "google",
 		ProviderUserID: "g-token-3",
 		Email:          "expired@example.com",
@@ -148,7 +149,7 @@ func TestLoginRepositoryRotateRejectsUnknownAndExpired(t *testing.T) {
 		t.Fatalf("seed user: %v", err)
 	}
 
-	repo := postgres.NewLoginRepository(pool)
+	repo := loginpg.NewLoginRepository(pool)
 	now := time.Now().UTC()
 
 	t.Run("unknown token", func(t *testing.T) {
@@ -192,7 +193,7 @@ func TestLoginRepositoryRevoke(t *testing.T) {
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
 
-	owner, err := postgres.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
+	owner, err := userspg.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
 		Provider:       "google",
 		ProviderUserID: "g-token-4",
 		Email:          "revoke@example.com",
@@ -201,7 +202,7 @@ func TestLoginRepositoryRevoke(t *testing.T) {
 		t.Fatalf("seed user: %v", err)
 	}
 
-	repo := postgres.NewLoginRepository(pool)
+	repo := loginpg.NewLoginRepository(pool)
 	now := time.Now().UTC()
 
 	for _, name := range []string{"a", "b"} {
@@ -249,14 +250,14 @@ func TestLoginRepositoryRevoke(t *testing.T) {
 }
 
 // compile-time assertion that the repository satisfies the domain contract
-var _ loginsvc.Repository = (*postgres.LoginRepository)(nil)
+var _ loginsvc.Repository = (*loginpg.LoginRepository)(nil)
 
 func TestLoginRepositoryDeleteRefreshTokensBefore(t *testing.T) {
 	pool := testutil.SetupDB(t)
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
 
-	owner, err := postgres.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
+	owner, err := userspg.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
 		Provider:       "google",
 		ProviderUserID: "g-token-prune",
 		Email:          "prune@example.com",
@@ -265,7 +266,7 @@ func TestLoginRepositoryDeleteRefreshTokensBefore(t *testing.T) {
 		t.Fatalf("seed user: %v", err)
 	}
 
-	repo := postgres.NewLoginRepository(pool)
+	repo := loginpg.NewLoginRepository(pool)
 	now := time.Now().UTC()
 
 	seed := func(name string, expiresAt time.Time, revokedAt *time.Time) {
@@ -317,7 +318,7 @@ func TestLoginRepositoryPruneKeepsReuseDetectionIntact(t *testing.T) {
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
 
-	owner, err := postgres.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
+	owner, err := userspg.NewUserRepository(pool).CreateWithIdentity(ctx, users.SocialProfile{
 		Provider:       "google",
 		ProviderUserID: "g-token-prune-2",
 		Email:          "prune2@example.com",
@@ -326,7 +327,7 @@ func TestLoginRepositoryPruneKeepsReuseDetectionIntact(t *testing.T) {
 		t.Fatalf("seed user: %v", err)
 	}
 
-	repo := postgres.NewLoginRepository(pool)
+	repo := loginpg.NewLoginRepository(pool)
 	now := time.Now().UTC()
 
 	if err := repo.CreateRefreshToken(ctx, loginsvc.RefreshToken{

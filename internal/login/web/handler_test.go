@@ -9,14 +9,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/benpsk/go-starter/internal/appsvc"
 	usersession "github.com/benpsk/go-starter/internal/auth/user"
 	"github.com/benpsk/go-starter/internal/config"
 	loginsvc "github.com/benpsk/go-starter/internal/login"
-	"github.com/benpsk/go-starter/internal/postgres"
-	"github.com/benpsk/go-starter/internal/storage"
+	loginpg "github.com/benpsk/go-starter/internal/login/postgres"
+	loginweb "github.com/benpsk/go-starter/internal/login/web"
 	"github.com/benpsk/go-starter/internal/testutil"
 	usersvc "github.com/benpsk/go-starter/internal/users"
+	userspg "github.com/benpsk/go-starter/internal/users/postgres"
+	usersweb "github.com/benpsk/go-starter/internal/users/web"
 	"github.com/benpsk/go-starter/internal/web"
 	"github.com/go-chi/chi/v5"
 )
@@ -73,9 +74,9 @@ func newBrowser(t *testing.T, verifier loginsvc.SocialVerifier) (*browser, func(
 	ctx, tx, done := testutil.BeginTx(t, pool)
 
 	cfg := webTestConfig()
-	userService := usersvc.NewService(postgres.NewUserRepository(pool))
+	userService := usersvc.NewService(userspg.NewUserRepository(pool))
 	loginService := loginsvc.NewService(
-		postgres.NewLoginRepository(pool),
+		loginpg.NewLoginRepository(pool),
 		userService,
 		verifier,
 		loginsvc.Config{
@@ -92,10 +93,9 @@ func newBrowser(t *testing.T, verifier loginsvc.SocialVerifier) (*browser, func(
 	sessions := usersession.NewManager(tx, cfg.Auth.SessionCookieName, cfg.Auth.SessionTTL, false)
 
 	r := chi.NewRouter()
-	web.Mount(r, cfg, sessions, appsvc.Services{
-		Users:   userService,
-		Login:   loginService,
-		Storage: storage.NewDisabledService("not configured in tests"),
+	web.Mount(r, cfg, sessions, func(browser chi.Router, session web.SessionMiddleware) {
+		loginweb.Mount(browser, cfg, sessions, loginService, session)
+		usersweb.Mount(browser, cfg.Setting(), userService, session)
 	})
 
 	return &browser{handler: r, ctx: ctx, cookies: map[string]*http.Cookie{}, t: t}, done
@@ -330,7 +330,7 @@ func TestBrowserLoginSurfacesAccountConflict(t *testing.T) {
 
 	// Take the email with a different provider first, so the Google sign-in
 	// collides on a verified address.
-	if _, err := postgres.NewUserRepository(testutil.SetupDB(t)).CreateWithIdentity(client.ctx, usersvc.SocialProfile{
+	if _, err := userspg.NewUserRepository(testutil.SetupDB(t)).CreateWithIdentity(client.ctx, usersvc.SocialProfile{
 		Provider:       "github",
 		ProviderUserID: "gh-web-3",
 		Email:          "conflict@example.com",

@@ -63,16 +63,6 @@ func (p SocialProfile) Validate() error {
 	return nil
 }
 
-// Service exposes user lookups and social account resolution.
-type Service interface {
-	FindByID(ctx context.Context, id int64) (User, error)
-	FindByEmail(ctx context.Context, email string) (User, error)
-	ListIdentities(ctx context.Context, userID int64) ([]Identity, error)
-	// ResolveSocialProfile returns the account behind a verified social
-	// profile, creating it on first sign-in.
-	ResolveSocialProfile(ctx context.Context, profile SocialProfile) (User, error)
-}
-
 // Repository abstracts persistence for users and their linked identities.
 type Repository interface {
 	FindByID(ctx context.Context, id int64) (User, error)
@@ -83,17 +73,18 @@ type Repository interface {
 	UpdateFromProfile(ctx context.Context, userID int64, profile SocialProfile) error
 }
 
-type service struct {
+// Service implements the users application operations.
+type Service struct {
 	repo Repository
 }
 
 // NewService constructs a user service using the supplied repository.
-func NewService(repo Repository) Service {
-	return &service{repo: repo}
+func NewService(repo Repository) *Service {
+	return &Service{repo: repo}
 }
 
 // FindByID returns one account by primary key.
-func (s *service) FindByID(ctx context.Context, id int64) (User, error) {
+func (s *Service) FindByID(ctx context.Context, id int64) (User, error) {
 	found, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return User{}, translate(err, "user not found", "failed to load user")
@@ -102,7 +93,7 @@ func (s *service) FindByID(ctx context.Context, id int64) (User, error) {
 }
 
 // FindByEmail returns one account by its canonical email address.
-func (s *service) FindByEmail(ctx context.Context, email string) (User, error) {
+func (s *Service) FindByEmail(ctx context.Context, email string) (User, error) {
 	found, err := s.repo.FindByEmail(ctx, email)
 	if err != nil {
 		return User{}, translate(err, "user not found", "failed to load user")
@@ -111,7 +102,7 @@ func (s *service) FindByEmail(ctx context.Context, email string) (User, error) {
 }
 
 // ListIdentities returns every login provider linked to the account.
-func (s *service) ListIdentities(ctx context.Context, userID int64) ([]Identity, error) {
+func (s *Service) ListIdentities(ctx context.Context, userID int64) ([]Identity, error) {
 	identities, err := s.repo.ListIdentitiesByUserID(ctx, userID)
 	if err != nil {
 		return nil, apperror.Internal("failed to load linked providers", err)
@@ -123,7 +114,7 @@ func (s *service) ListIdentities(ctx context.Context, userID int64) ([]Identity,
 // existing identity wins; otherwise a verified email that already belongs to
 // another provider is rejected rather than silently merged, because this
 // starter does not implement account linking.
-func (s *service) ResolveSocialProfile(ctx context.Context, profile SocialProfile) (User, error) {
+func (s *Service) ResolveSocialProfile(ctx context.Context, profile SocialProfile) (User, error) {
 	if err := profile.Validate(); err != nil {
 		return User{}, apperror.BadRequest("social profile is incomplete")
 	}

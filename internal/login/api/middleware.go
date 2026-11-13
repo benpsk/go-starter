@@ -2,11 +2,18 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
+	transport "github.com/benpsk/go-starter/internal/api"
 	"github.com/benpsk/go-starter/internal/apperror"
 	"github.com/benpsk/go-starter/internal/authctx"
 	loginsvc "github.com/benpsk/go-starter/internal/login"
 )
+
+// AccessTokenParser validates bearer credentials.
+type AccessTokenParser interface {
+	ParseAccessToken(string) (loginsvc.AccessTokenClaims, error)
+}
 
 // Authenticator rejects requests without a valid bearer access token and stores
 // the principal on the request context.
@@ -14,16 +21,28 @@ import (
 // Only the token is verified here: access tokens are short-lived and
 // self-contained, so an authenticated request costs no database round trip.
 // Handlers that need the full user record load it from the users service.
-func Authenticator(svc loginsvc.Service) func(http.Handler) http.Handler {
+func Authenticator(svc AccessTokenParser) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			claims, err := svc.ParseAccessToken(loginsvc.BearerTokenFromRequest(r))
+			claims, err := svc.ParseAccessToken(bearerTokenFromRequest(r))
 			if err != nil {
-				Error(w, apperror.Unauthorized("unauthorized"))
+				transport.Error(w, apperror.Unauthorized("unauthorized"))
 				return
 			}
 			ctx := authctx.WithUser(r.Context(), authctx.User{ID: claims.UserID})
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// bearerTokenFromRequest extracts the credential from an Authorization header.
+func bearerTokenFromRequest(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	if len(header) < 7 || !strings.EqualFold(header[:7], "Bearer ") {
+		return ""
+	}
+	return strings.TrimSpace(header[7:])
 }

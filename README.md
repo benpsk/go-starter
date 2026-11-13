@@ -1,6 +1,6 @@
 # Go Starter
 
-A minimal Go web + JSON API starter with a layered, domain-driven structure.
+A minimal Go web + JSON API starter organized by business feature, with explicit package boundaries.
 
 ## Stack
 
@@ -43,67 +43,70 @@ without sourcing anything first.
 
 ## Architecture
 
-Wiring happens in exactly one place. `internal/app` is the composition root: it
-opens the pool, builds every repository, builds every service, packs them into
-`appsvc.Services`, and hands that to whichever entrypoint asked. `cmd/app` is a
-dispatcher — it resolves a command and maps the outcome to an exit code.
+This is a modular monolith: one binary and one `go.mod`, with business features
+organized under `internal`. `internal/app` is the composition root: it lazily
+constructs repositories and services. `cmd/app` dispatches commands and maps
+outcomes to exit codes. `internal/server` mounts feature routers under the shared
+browser and API middleware.
 
+```text
+internal/
+  users/
+    service.go             models, business rules, Repository interface
+    service_test.go        business tests without HTTP or PostgreSQL
+    postgres/              user SQL and database tests
+    web/                   account routes, handler, props, and template
+  login/
+    service.go             OAuth and token operations
+    postgres/              refresh-token SQL and database tests
+    api/                   auth JSON routes, bearer middleware, feature tests
+    web/                   browser sign-in routes, props, template, feature tests
+  health/
+    service.go             dependency readiness rules
+    postgres/              database probe
+    api/                   /healthz and /readyz
+  app/                     dependency construction and lifecycle
+  appsvc/                  concrete service aggregate for composition
+  server/                  HTTP lifecycle, global middleware, router mounting
+  console/                 command transport
+  postgres/                shared pool, querier, migrations, and transaction helpers
+  api/                     common JSON envelope, parsing, and API middleware
+  web/                     common browser middleware, layouts, static pages, assets
 ```
-cmd/app/main.go          argv -> command; registers `serve`
-  ├─ internal/console    the command transport: db:*, cron:*, help, version
-  └─ internal/server     global middleware, static files, /healthz, /readyz
-       ├─ internal/web   browser routes, handlers, templ pages   (web.Mount)
-       └─ internal/api   JSON routes and handlers                (api.Mount)
 
-internal/app             config -> pool -> repositories -> services -> Services
-internal/<domain>        Service + Repository interfaces, models, business rules
-internal/postgres        Repository implementations over a shared Querier
-```
+A feature root package never imports its own adapters. Both `login/api` and
+`login/postgres` import `login`; `app` constructs the service with its repository.
+Feature routers receive individual services, not the entire application.
+Cross-feature dependencies use narrow interfaces declared by the consumer, such
+as login's `UserResolver`. Shared transport packages do not import feature
+adapters, so features can be mounted and tested independently.
 
-Each layer only knows the one below it:
+Create adapter subpackages only when needed. A feature does not need HTTP, SQL,
+and browser packages merely to follow a directory template. Keep multiple
+focused files in one package until a distinct dependency boundary is useful.
 
-- A **domain package** (`internal/users`, `internal/login`, `internal/health`)
-  declares a `Service` interface, its models, a `Repository` interface, and a
-  private implementation. It imports no transport and no database driver.
-- **`internal/postgres`** implements those `Repository` interfaces, one file per
-  domain, and returns domain types. Repositories take `postgres.Querier`, which
-  both `*pgxpool.Pool` and `pgx.Tx` satisfy.
-- **Transports** (`internal/web`, `internal/api`) hold only the services they
-  use. They never see a database handle.
-- **`internal/server`** composes middleware and mounts the two HTTP transports.
-  It constructs nothing else.
-- **`internal/console`** is a third transport, serving argv the way the others
-  serve HTTP. It imports neither `server`, `web`, nor `api`: `serve` is
-  registered from `cmd/app`, so the import graph makes it impossible for a
-  console command to reach a handler.
+To add products:
 
-### Layout
+1. Define models, a concrete service, and its repository contract in
+   `internal/products`.
+2. Implement SQL in `internal/products/postgres` over the shared
+   `postgres.Querier`, which accepts a pool or transaction.
+3. Add the service to `appsvc.Services` and construct it in `internal/app`.
+4. Add `internal/products/api` and/or `internal/products/web`, then mount its
+   routes from `internal/server/http_router.go` inside the common transport
+   router. Put feature page props and templates together in its `web` package.
 
-- `cmd/app` — the single entrypoint: argv dispatch, and the `serve` command.
-- `internal/app` — the composition root, built lazily in tiers.
-- `internal/console` — the command transport (`db:*`, `cron:*`, `help`, `version`).
-- `internal/server` — HTTP composition layer plus the health handler.
-- `internal/appsvc` — the `Services` aggregate (aliased as `server.Services`).
-- `internal/api` — JSON routes, handlers, response envelope, bearer auth.
-- `internal/web` — browser routes, handlers, templ pages/components, assets,
-  CSRF and session middleware.
-- `internal/postgres` — repositories, connection pool, migrator.
-- `internal/users`, `internal/login`, `internal/health` — domain packages.
-- `internal/auth/user` — browser session cookie manager.
-- `internal/apperror` — the shared error type every transport renders.
-- `internal/ratelimit` — transport-agnostic fixed-window limiter.
-- `internal/authctx` — the request-scoped authenticated principal.
-- `internal/storage` — object storage interface with local and R2 drivers.
-- `internal/config` — environment configuration and validation.
-- `internal/testutil` — test scaffolding.
-- `db` — embedded migrations and seeders.
-- `pkg/pagination` — page-size rules for list endpoints.
+Shared infrastructure also includes configuration, application errors and HTTP
+error mapping, rate limiting, authenticated context, browser sessions, storage,
+and test helpers. SQL migrations and seeders remain centrally embedded in `db`;
+built frontend assets are served from `static`.
 
 ## Errors and responses
 
-Services return `*apperror.AppError`, which carries the HTTP status, a
+Services return `*apperror.AppError`, which carries a semantic failure kind, a
 user-facing message, an optional machine-readable code, field-level details, and
-the internal cause. Transports render it:
+the internal cause. HTTP transports map kinds to status codes through
+`internal/httperror`, preserving the API response contract:
 
 ```go
 // service
