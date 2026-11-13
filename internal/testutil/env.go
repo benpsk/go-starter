@@ -1,28 +1,12 @@
 // Package testutil holds the shared test scaffolding: loading .env.test,
-// serialising access to the integration database, and preparing its schema.
+// isolating package schemas and managing test transactions.
 package testutil
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/joho/godotenv"
 )
-
-// LoadEnv finds the nearest .env.test and loads it into the process
-// environment, overriding any value already set so a developer's shell cannot
-// point a test run at the development database.
-func LoadEnv() error {
-	path, err := FindUp(".env.test")
-	if err != nil {
-		return err
-	}
-	if err := godotenv.Overload(path); err != nil {
-		return fmt.Errorf("load %s: %w", path, err)
-	}
-	return nil
-}
 
 // FindUp walks up from the working directory looking for name.
 func FindUp(name string) (string, error) {

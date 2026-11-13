@@ -16,7 +16,7 @@ COVER_EXCLUDE_FILE_RE := /internal/.+_templ\.go:|/static/
 COVER_MERGE := awk '$$0 !~ /^mode:/ { k = $$1 " " $$2; c = $$3 + 0; if (!(k in seen) || c > seen[k]) seen[k] = c } END { for (k in seen) print k, seen[k] }'
 
 .PHONY: tidy fmt build assets templ css js vendor \
-	test testv test-race test-cover test-cover-html test-cover-gate \
+	test test-unit test-db test-ci testv test-race test-cover test-cover-html test-cover-gate \
 	cmd cmd-test serve migrate seed status fresh dump \
 	migrate-test fresh-test fresh-seed-test \
 	live live/templ live/server live/assets live/sync_assets \
@@ -48,6 +48,15 @@ assets: templ css js vendor ## Generate templ output and bundled static assets
 
 test: ## Run tests
 	@set -o pipefail; $(GOENV) go test ./... | grep -v "\[no test files\]"
+
+test-unit: ## Run tests without database infrastructure
+	@$(GOENV) go test -short ./...
+
+test-db: ## Run all tests and fail if PostgreSQL is unavailable
+	@REQUIRE_TEST_DB=1 $(GOENV) go test -count=1 ./...
+
+test-ci: ## Require PostgreSQL and run the full suite with race checks
+	@REQUIRE_TEST_DB=1 $(GOENV) go test -count=1 -race ./...
 
 testv: ## Run tests with verbose output
 	@set -o pipefail; $(GOENV) go test ./... -v | grep -v "\[no test files\]"

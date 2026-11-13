@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/benpsk/go-starter/internal/app"
 	"github.com/benpsk/go-starter/internal/config"
@@ -22,10 +23,10 @@ import (
 func newLiveRegistry(t *testing.T, appEnv string) (*Registry, AppFunc, *bytes.Buffer) {
 	t.Helper()
 
-	testutil.SetupDB(t) // loads .env.test and migrates, or skips
-	cfg, err := config.Load()
-	if err != nil {
-		t.Fatalf("load config: %v", err)
+	pool := testutil.DisposableDatabase(t)
+	cfg := config.Config{
+		Database: config.DatabaseConfig{URL: pool.Config().ConnString(), MaxConns: 2},
+		Auth:     config.AuthConfig{SessionCookieName: "test_session", SessionTTL: time.Hour},
 	}
 	cfg.AppEnv = appEnv
 	// Keep the object store out of the working tree.
@@ -58,7 +59,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	if err := runFromRepoRoot(t, r, appFunc, "db:migrate"); err != nil {
 		t.Fatalf("db:migrate failed: %v", err)
 	}
-	// SetupDB already migrated, so a second run must be a no-op rather than an
+	// The disposable database is already migrated, so a second run must be a no-op rather than an
 	// error.
 	if !strings.Contains(out.String(), "nothing to apply") {
 		t.Fatalf("unexpected output: %q", out.String())

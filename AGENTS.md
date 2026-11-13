@@ -79,6 +79,9 @@ normal collection of Go packages within the single root `go.mod`.
 - `make assets`: generate templ output and bundled static assets.
 - `make build`: generate assets and compile both binaries.
 - `make test`: run Go tests.
+- `make test-unit`: run tests without database setup (`-short`).
+- `make test-db`: run uncached tests with PostgreSQL required.
+- `make test-ci`: run uncached tests with PostgreSQL required and race detection.
 - `make testv`: run Go tests with verbose output.
 - `make test-race`: run tests with the race detector.
 - `make test-cover`: report core coverage.
@@ -158,8 +161,24 @@ normal collection of Go packages within the single root `go.mod`.
 - Add table-driven tests for multiple cases.
 - Repository tests live in the external `postgres_test` package so they can use
   `internal/testutil`; internal unit tests use `package postgres`.
-- `testutil.SetupDB(t)` prepares the schema once per binary and **skips** when no
-  database is reachable, so a fresh clone still runs the rest of the suite.
+- `testutil.SetupDB(t)` prepares a unique schema once per test binary. Register
+  `os.Exit(testutil.Run(m))` in `TestMain` to close the pool and drop the schema.
+  Every connection must use that schema through the DSN's `search_path`.
+- `BeginTx` / `WithTx` automatically roll back with `t.Cleanup`; the returned
+  cleanup may also be deferred. Never commit or escape the test transaction.
+- Use `CommittedDB` for real commits, DDL, or multiple sessions; it gives each
+  test a migrated schema and drops it after the test. No shared-table truncation.
+- Use `MigrationDB` for empty, history-ready disposable migration schemas.
+- Use `DisposableDatabase` for database-wide commands such as `db:fresh` and
+  `pg_dump`, or tests requiring hardcoded `public`. This requires CREATEDB.
+- Database helpers read `TEST_DATABASE_URL` or `DATABASE_URL` from `.env.test`
+  without mutating environment. Never fall back to the application DSN.
+- Unavailable databases skip locally, but fail with `CI=true` or
+  `REQUIRE_TEST_DB=1`. `-short` explicitly skips database setup. CI runs
+  `make test-ci`; `make test-unit` is the infrastructure-free development loop.
+- Packages run in parallel without a global lock. Use `t.Parallel()` within a
+  package only when state is transaction- or schema-isolated and the test does
+  not modify process environment or working directory.
 - `testutil.WithTx(t, pool)` gives a context whose querier is a transaction that
   is always rolled back. Pass it to the request under test
   (`req.WithContext(ctx)`) so the whole handler chain stays isolated.

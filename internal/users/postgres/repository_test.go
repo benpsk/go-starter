@@ -21,6 +21,7 @@ func googleProfile() users.SocialProfile {
 }
 
 func TestUserRepositoryCreateWithIdentity(t *testing.T) {
+	t.Parallel()
 	pool := testutil.SetupDB(t)
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
@@ -76,6 +77,7 @@ func TestUserRepositoryCreateWithIdentity(t *testing.T) {
 }
 
 func TestUserRepositoryCreateWithIdentityRejectsDuplicateEmail(t *testing.T) {
+	t.Parallel()
 	pool := testutil.SetupDB(t)
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
@@ -95,6 +97,7 @@ func TestUserRepositoryCreateWithIdentityRejectsDuplicateEmail(t *testing.T) {
 }
 
 func TestUserRepositoryCreateWithIdentityRejectsDuplicateIdentity(t *testing.T) {
+	t.Parallel()
 	pool := testutil.SetupDB(t)
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
@@ -115,6 +118,7 @@ func TestUserRepositoryCreateWithIdentityRejectsDuplicateIdentity(t *testing.T) 
 }
 
 func TestUserRepositoryCreateWithIdentityAllowsMissingEmail(t *testing.T) {
+	t.Parallel()
 	pool := testutil.SetupDB(t)
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
@@ -146,6 +150,7 @@ func TestUserRepositoryCreateWithIdentityAllowsMissingEmail(t *testing.T) {
 }
 
 func TestUserRepositoryCreateWithIdentityValidatesProfile(t *testing.T) {
+	t.Parallel()
 	pool := testutil.SetupDB(t)
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
@@ -158,6 +163,7 @@ func TestUserRepositoryCreateWithIdentityValidatesProfile(t *testing.T) {
 }
 
 func TestUserRepositoryUpdateFromProfile(t *testing.T) {
+	t.Parallel()
 	pool := testutil.SetupDB(t)
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
@@ -203,6 +209,7 @@ func TestUserRepositoryUpdateFromProfile(t *testing.T) {
 }
 
 func TestUserRepositoryLookupMisses(t *testing.T) {
+	t.Parallel()
 	pool := testutil.SetupDB(t)
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()
@@ -228,6 +235,7 @@ func TestUserRepositoryLookupMisses(t *testing.T) {
 }
 
 func TestUserRepositoryListIdentitiesIsEmptyForUnknownUser(t *testing.T) {
+	t.Parallel()
 	pool := testutil.SetupDB(t)
 	ctx, done := testutil.WithTx(t, pool)
 	defer done()

@@ -2,136 +2,318 @@ package testutil
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"io/fs"
+	"net/url"
+	"os"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 
-	"github.com/benpsk/go-starter/internal/config"
+	dbsql "github.com/benpsk/go-starter/db"
 	"github.com/benpsk/go-starter/internal/postgres"
 )
 
-// schemaLockID serialises every package that migrates the test database, so
-// packages running in parallel cannot reset the schema under each other.
-const schemaLockID int64 = 7202602
+const setupTimeout = 30 * time.Second
 
 var (
-	setupOnce sync.Once
-	sharedDB  *pgxpool.Pool
-	setupErr  error
+	setupOnce     sync.Once
+	sharedDB      *pgxpool.Pool
+	setupErr      error
+	sharedCleanup func() error
 )
 
-// errDatabaseUnavailable reports that no test database could be reached.
 var errDatabaseUnavailable = errors.New("test database is unavailable")
 
-// SetupDB returns a pool for the migrated test database, preparing it once per
-// test binary. It skips the calling test when no database is reachable, so a
-// fresh clone can still run the rest of the suite.
-//
-// Tests run against real PostgreSQL. Nothing is mocked at this layer, because
-// the SQL and its constraints are exactly what these tests exist to check.
+// Run runs a package's tests and releases its shared database resources.
+// Call os.Exit(testutil.Run(m)) from TestMain in packages using SetupDB.
+func Run(m *testing.M) int {
+	code := m.Run()
+	if sharedCleanup != nil {
+		if err := sharedCleanup(); err != nil {
+			fmt.Fprintln(os.Stderr, "clean up test database:", err)
+			return 1
+		}
+	}
+	return code
+}
+
+// SetupDB shares one migrated, uniquely named schema per test binary. Package
+// binaries and concurrent suite runs never share schema objects or data.
+// Register Run in TestMain so the schema is removed when the suite finishes.
 func SetupDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-
-	setupOnce.Do(func() {
-		sharedDB, setupErr = prepareDB()
-	})
-	if setupErr != nil {
-		if errors.Is(setupErr, errDatabaseUnavailable) {
-			t.Skipf("skipping database test: %v", setupErr)
-		}
-		t.Fatalf("prepare test database: %v", setupErr)
-	}
+	skipShort(t)
+	setupOnce.Do(func() { sharedDB, sharedCleanup, setupErr = newSchema(true) })
+	requireDB(t, setupErr)
 	return sharedDB
 }
 
-func prepareDB() (*pgxpool.Pool, error) {
-	if err := LoadEnv(); err != nil {
-		return nil, fmt.Errorf("%w: %v", errDatabaseUnavailable, err)
-	}
+// CommittedDB gives a test its own migrated schema and pool. Use it for real
+// commits, independent connections, or DDL; cleanup drops the whole schema.
+func CommittedDB(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	return isolatedSchema(t, true)
+}
 
-	cfg, err := config.Load()
+// MigrationDB gives a test an empty schema with only schema_history prepared.
+// Application migrations are deliberately not applied. Cleanup drops the schema.
+func MigrationDB(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	return isolatedSchema(t, false)
+}
+
+func isolatedSchema(t *testing.T, migrate bool) *pgxpool.Pool {
+	t.Helper()
+	skipShort(t)
+	pool, cleanup, err := newSchema(migrate)
+	requireDB(t, err)
+	t.Cleanup(func() {
+		if err := cleanup(); err != nil {
+			t.Errorf("drop test schema: %v", err)
+		}
+	})
+	return pool
+}
+
+// DisposableDatabase gives a test a migrated database with its own public
+// schema. Reserve it for database-wide operations such as db:fresh and pg_dump.
+// The configured role must have CREATEDB. Cleanup closes the pool and drops it.
+func DisposableDatabase(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	skipShort(t)
+	cfg, err := databaseConfig()
+	requireDB(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), setupTimeout)
+	defer cancel()
+	admin, err := connect(ctx, cfg)
+	requireDB(t, err)
+	name := uniqueName()
+	ident := pgx.Identifier{name}.Sanitize()
+	if _, err := admin.Exec(ctx, "create database "+ident); err != nil {
+		admin.Close()
+		t.Fatalf("create disposable test database (role needs CREATEDB): %v", err)
+	}
+	// Preserve the new database in ConnString too: callers may construct app pools.
+	cfg, err = pgxpool.ParseConfig(withDatabase(cfg.ConnString(), name))
 	if err != nil {
-		return nil, err
+		t.Fatalf("configure disposable database: %v", err)
 	}
-
-	ctx := context.Background()
-	pool, err := postgres.Connect(ctx, cfg.Database)
+	cfg.MaxConns = 4
+	cfg.MinConns = 0
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	cleanup := func() error {
+		if pool != nil {
+			pool.Close()
+		}
+		defer admin.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), setupTimeout)
+		defer cancel()
+		_, err := admin.Exec(ctx, "drop database "+ident+" with (force)")
+		return err
+	}
+	t.Cleanup(func() {
+		if err := cleanup(); err != nil {
+			t.Errorf("drop disposable database: %v", err)
+		}
+	})
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errDatabaseUnavailable, err)
+		t.Fatalf("connect disposable database: %v", err)
 	}
+	if err := migrateSchema(ctx, pool, true); err != nil {
+		t.Fatalf("prepare disposable database: %v", err)
+	}
+	return pool
+}
 
-	// The lock is held for the lifetime of the test binary and released when
-	// the process exits.
-	if _, err := lockDB(ctx, pool, schemaLockID); err != nil {
-		pool.Close()
-		return nil, err
+func newSchema(migrate bool) (*pgxpool.Pool, func() error, error) {
+	cfg, err := databaseConfig()
+	if err != nil {
+		return nil, nil, err
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), setupTimeout)
+	defer cancel()
+	admin, err := connect(ctx, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	name := uniqueName()
+	ident := pgx.Identifier{name}.Sanitize()
+	if _, err := admin.Exec(ctx, "create schema "+ident); err != nil {
+		admin.Close()
+		return nil, nil, fmt.Errorf("create test schema: %w", err)
+	}
+	// Put search_path into the DSN, not only the parsed RuntimeParams: app tests
+	// may open another pool from Config().ConnString(). Every connection must use it.
+	scoped, err := pgxpool.ParseConfig(withSearchPath(cfg.ConnString(), name))
+	var pool *pgxpool.Pool
+	cleanup := func() error {
+		if pool != nil {
+			pool.Close()
+		}
+		defer admin.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), setupTimeout)
+		defer cancel()
+		_, err := admin.Exec(ctx, "drop schema "+ident+" cascade")
+		return err
+	}
+	if err == nil {
+		scoped.MaxConns = 4
+		scoped.MinConns = 0
+		pool, err = pgxpool.NewWithConfig(ctx, scoped)
+	}
+	if err == nil {
+		err = migrateSchema(ctx, pool, migrate)
+	}
+	if err != nil {
+		cleanupErr := cleanup()
+		return nil, nil, errors.Join(err, cleanupErr)
+	}
+	return pool, cleanup, nil
+}
 
-	if err := postgres.ResetSchema(ctx, pool); err != nil {
-		pool.Close()
-		return nil, err
-	}
+func migrateSchema(ctx context.Context, pool *pgxpool.Pool, migrate bool) error {
 	if err := postgres.EnsureHistoryTable(ctx, pool); err != nil {
-		pool.Close()
-		return nil, err
+		return err
 	}
+	if migrate {
+		migrations, err := fs.Sub(dbsql.Migrations, "migrations")
+		if err != nil {
+			return err
+		}
+		_, err = postgres.ApplyFS(ctx, pool, migrations, postgres.ApplyOptions{Kind: postgres.KindMigration})
+		return err
+	}
+	return nil
+}
 
-	root, err := RepoRoot()
+func databaseConfig() (*pgxpool.Config, error) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_DATABASE_URL"))
+	if dsn == "" {
+		path, err := FindUp(".env.test")
+		if err != nil {
+			return nil, fmt.Errorf("%w: set TEST_DATABASE_URL or create .env.test", errDatabaseUnavailable)
+		}
+		values, err := godotenv.Read(path)
+		if err != nil {
+			return nil, fmt.Errorf("read .env.test: %w", err)
+		}
+		dsn = strings.TrimSpace(values["DATABASE_URL"])
+	}
+	if dsn == "" {
+		return nil, fmt.Errorf("%w: test DSN is empty", errDatabaseUnavailable)
+	}
+	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		pool.Close()
-		return nil, err
+		return nil, fmt.Errorf("parse test database configuration: %w", err)
 	}
-	if _, err := postgres.Apply(ctx, pool, filepath.Join(root, "db", "migrations"), postgres.ApplyOptions{
-		Kind: postgres.KindMigration,
-	}); err != nil {
-		pool.Close()
-		return nil, err
-	}
+	cfg.MaxConns = 2
+	cfg.MinConns = 0
+	cfg.ConnConfig.ConnectTimeout = 5 * time.Second
+	return cfg, nil
+}
 
+func connect(ctx context.Context, cfg *pgxpool.Config) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("%w: %v", errDatabaseUnavailable, err)
+	}
 	return pool, nil
 }
 
-// WithTx runs a test inside a transaction that is always rolled back, so cases
-// stay isolated without truncating tables between them.
+func uniqueName() string {
+	var value [12]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		panic("generate test schema name: " + err.Error())
+	}
+	return "go_test_" + hex.EncodeToString(value[:])
+}
+
+func withSearchPath(dsn, schema string) string {
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		u, _ := url.Parse(dsn)
+		q := u.Query()
+		q.Set("search_path", schema)
+		u.RawQuery = q.Encode()
+		return u.String()
+	}
+	return dsn + " search_path=" + schema
+}
+
+func withDatabase(dsn, name string) string {
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		u, _ := url.Parse(dsn)
+		u.Path = "/" + name
+		q := u.Query()
+		q.Del("search_path")
+		u.RawQuery = q.Encode()
+		return u.String()
+	}
+	return dsn + " dbname=" + name + " search_path=public"
+}
+
+func skipShort(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("database tests disabled by -short")
+	}
+}
+
+func requireDB(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	if errors.Is(err, errDatabaseUnavailable) && !databaseRequired() {
+		t.Skipf("skipping database test: %v", err)
+	}
+	t.Fatalf("prepare test database: %v", err)
+}
+
+func databaseRequired() bool {
+	enabled := func(value string) bool { return value != "" && value != "0" && !strings.EqualFold(value, "false") }
+	return enabled(os.Getenv("CI")) || enabled(os.Getenv("REQUIRE_TEST_DB"))
+}
+
+// WithTx starts an automatically cleaned-up test transaction. The returned
+// cleanup is safe to defer too; t.Cleanup also covers failures and early returns.
 func WithTx(t *testing.T, pool *pgxpool.Pool) (context.Context, func()) {
 	t.Helper()
 	ctx, _, done := BeginTx(t, pool)
 	return ctx, done
 }
 
-// BeginTx is WithTx that also hands back the transaction, for tests that must
-// give it to a component reading the database outside the request context (the
-// session manager, for one).
+// BeginTx also returns the transaction for dependencies that need explicit
+// injection, such as the session manager. Never commit this transaction.
 func BeginTx(t *testing.T, pool *pgxpool.Pool) (context.Context, pgx.Tx, func()) {
 	t.Helper()
-
 	ctx := context.Background()
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	return postgres.WithQuerier(ctx, tx), tx, func() {
-		_ = tx.Rollback(ctx)
+	var once sync.Once
+	done := func() {
+		once.Do(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := tx.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+				t.Errorf("rollback test transaction: %v", err)
+			}
+		})
 	}
-}
-
-// lockDB takes a session-scoped advisory lock so parallel packages serialise.
-func lockDB(ctx context.Context, pool *pgxpool.Pool, lockID int64) (func(), error) {
-	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("acquire advisory lock conn: %w", err)
-	}
-	if _, err := conn.Exec(ctx, `select pg_advisory_lock($1)`, lockID); err != nil {
-		conn.Release()
-		return nil, fmt.Errorf("acquire advisory lock: %w", err)
-	}
-	return func() {
-		_, _ = conn.Exec(context.Background(), `select pg_advisory_unlock($1)`, lockID)
-		conn.Release()
-	}, nil
+	t.Cleanup(done)
+	return postgres.WithQuerier(ctx, tx), tx, done
 }

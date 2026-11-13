@@ -48,7 +48,7 @@ func appliedAt(t *testing.T, pool *pgxpool.Pool, kind postgres.Kind, name string
 }
 
 func TestApplyRunsEachFileOnce(t *testing.T) {
-	pool := testutil.SetupDB(t)
+	pool := testutil.MigrationDB(t)
 	ctx := context.Background()
 
 	dir := t.TempDir()
@@ -76,7 +76,7 @@ func TestApplyRunsEachFileOnce(t *testing.T) {
 }
 
 func TestApplyOrdersLexicographically(t *testing.T) {
-	pool := testutil.SetupDB(t)
+	pool := testutil.MigrationDB(t)
 	ctx := context.Background()
 
 	dir := t.TempDir()
@@ -95,7 +95,7 @@ func TestApplyOrdersLexicographically(t *testing.T) {
 }
 
 func TestApplyRollsBackAFailedFile(t *testing.T) {
-	pool := testutil.SetupDB(t)
+	pool := testutil.MigrationDB(t)
 	ctx := context.Background()
 
 	dir := t.TempDir()
@@ -116,7 +116,7 @@ func TestApplyRollsBackAFailedFile(t *testing.T) {
 }
 
 func TestApplyRecordsAnEmptyFile(t *testing.T) {
-	pool := testutil.SetupDB(t)
+	pool := testutil.MigrationDB(t)
 	ctx := context.Background()
 
 	dir := t.TempDir()
@@ -133,7 +133,7 @@ func TestApplyRecordsAnEmptyFile(t *testing.T) {
 }
 
 func TestApplyRequiresAKind(t *testing.T) {
-	pool := testutil.SetupDB(t)
+	pool := testutil.MigrationDB(t)
 
 	if _, err := postgres.Apply(context.Background(), pool, t.TempDir(), postgres.ApplyOptions{}); err == nil {
 		t.Fatalf("expected a missing kind to be rejected")
@@ -141,7 +141,7 @@ func TestApplyRequiresAKind(t *testing.T) {
 }
 
 func TestApplyOnlyRunsTheNamedFile(t *testing.T) {
-	pool := testutil.SetupDB(t)
+	pool := testutil.MigrationDB(t)
 	ctx := context.Background()
 
 	dir := t.TempDir()
@@ -162,7 +162,7 @@ func TestApplyOnlyRunsTheNamedFile(t *testing.T) {
 }
 
 func TestApplyOnlyRejectsAnAbsentFile(t *testing.T) {
-	pool := testutil.SetupDB(t)
+	pool := testutil.MigrationDB(t)
 
 	_, err := postgres.Apply(context.Background(), pool, t.TempDir(), postgres.ApplyOptions{
 		Kind: postgres.KindMigration,
@@ -174,7 +174,7 @@ func TestApplyOnlyRejectsAnAbsentFile(t *testing.T) {
 }
 
 func TestApplyForceReRunsAndUpdatesTheTimestamp(t *testing.T) {
-	pool := testutil.SetupDB(t)
+	pool := testutil.MigrationDB(t)
 	ctx := context.Background()
 
 	dir := t.TempDir()
@@ -225,7 +225,7 @@ func TestApplyForceReRunsAndUpdatesTheTimestamp(t *testing.T) {
 }
 
 func TestKindsAreTrackedIndependently(t *testing.T) {
-	pool := testutil.SetupDB(t)
+	pool := testutil.MigrationDB(t)
 	ctx := context.Background()
 
 	// The reason schema_history is keyed on (kind, name): a seeder sharing a
@@ -260,7 +260,7 @@ func TestKindsAreTrackedIndependently(t *testing.T) {
 }
 
 func TestApplyFSAndStatusFS(t *testing.T) {
-	pool := testutil.SetupDB(t)
+	pool := testutil.MigrationDB(t)
 	ctx := context.Background()
 
 	source := fstest.MapFS{
@@ -297,7 +297,7 @@ func TestApplyFSAndStatusFS(t *testing.T) {
 }
 
 func TestStatusReportsAppliedPendingAndMissing(t *testing.T) {
-	pool := testutil.SetupDB(t)
+	pool := testutil.MigrationDB(t)
 	ctx := context.Background()
 
 	dir := t.TempDir()
@@ -337,7 +337,7 @@ func TestStatusReportsAppliedPendingAndMissing(t *testing.T) {
 }
 
 func TestStatusIsScopedToItsKind(t *testing.T) {
-	pool := testutil.SetupDB(t)
+	pool := testutil.MigrationDB(t)
 	ctx := context.Background()
 
 	forgetHistory(t, pool, "000001_seeder_only.sql")
@@ -358,7 +358,7 @@ func TestStatusIsScopedToItsKind(t *testing.T) {
 }
 
 func TestMissingDirectoryIsReported(t *testing.T) {
-	pool := testutil.SetupDB(t)
+	pool := testutil.MigrationDB(t)
 	absent := filepath.Join(t.TempDir(), "nope")
 
 	if _, err := postgres.Apply(context.Background(), pool, absent, migrationOpts()); err == nil {
@@ -370,7 +370,7 @@ func TestMissingDirectoryIsReported(t *testing.T) {
 }
 
 func TestEnsureHistoryTableIsIdempotent(t *testing.T) {
-	pool := testutil.SetupDB(t)
+	pool := testutil.MigrationDB(t)
 	ctx := context.Background()
 
 	for i := 0; i < 3; i++ {
@@ -381,7 +381,7 @@ func TestEnsureHistoryTableIsIdempotent(t *testing.T) {
 }
 
 func TestEnsureHistoryTableAdoptsTheLegacyTables(t *testing.T) {
-	pool := testutil.SetupDB(t)
+	pool := testutil.MigrationDB(t)
 	ctx := context.Background()
 
 	// Recreate the two-table layout this replaced, as an existing database

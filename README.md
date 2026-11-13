@@ -237,23 +237,68 @@ or refresh tokens, so without them those tables grow without bound.
 
 ## Testing
 
-Tests run against a real PostgreSQL database; nothing at the persistence layer is
-mocked. Copy `.env.example` to `.env.test`, point `DATABASE_URL` at a scratch
-database, and run `make migrate-test`.
+Tests use real PostgreSQL for persistence. Set `TEST_DATABASE_URL` explicitly or
+copy `.env.example` to `.env.test` and set its `DATABASE_URL` to a dedicated test
+database. Test helpers read that file without changing process environment; the
+application's `DATABASE_URL` is never used implicitly. No manual migration step
+is needed. The role needs permission to create schemas, and `CREATEDB` for the
+console tests exercising database-wide commands.
 
-`testutil.SetupDB(t)` prepares the schema once per test binary and **skips** the
-calling test when no database is reachable, so `make test` still passes on a
-fresh clone. `testutil.WithTx(t, pool)` returns a context whose querier is a
-transaction that is always rolled back; pass it to the request under test with
-`req.WithContext(ctx)` and the whole handler chain stays isolated.
+| Mode | Helper | Isolation and lifecycle |
+|---|---|---|
+| Ordinary repository and HTTP feature tests | `SetupDB` + `BeginTx` / `WithTx` | One migrated schema per test binary; rollback after each test |
+| Real commits, multiple connections, or DDL | `CommittedDB` | One migrated schema per test; dropped during cleanup |
+| Migrations | `MigrationDB` | One empty schema per test, with only history bookkeeping prepared |
+| Full application / database-wide commands | Construct the required app; use `DisposableDatabase` when operations require `public` | Dedicated migrated database per test; dropped during cleanup |
 
-Three layers of tests, following the three layers of code:
+Schema names include random identifiers, so packages and simultaneous suite runs
+can execute in parallel on the same server without a global lock. Every pooled
+connection uses the isolated schema; no `public` fallback is included. Full
+application startup is reserved for composition and command tests, not ordinary
+HTTP feature tests.
 
-- **Service tests** use an in-memory stub of the domain `Repository` interface.
-- **Repository tests** live in the external `postgres_test` package and exercise
-  real SQL, constraints, and transactions.
-- **Feature tests** drive the mounted router with real services and a real
-  database, substituting only the OAuth provider.
+Packages using `SetupDB` register the suite lifecycle:
+
+```go
+func TestMain(m *testing.M) {
+    os.Exit(testutil.Run(m))
+}
+```
+
+`Run` closes the shared pool and drops its schema after all tests, including
+parallel tests. Each disposable helper registers its own cleanup. Transaction
+cleanup is automatic even on early return; the returned cleanup function can
+also be deferred. Pass the returned context through requests with
+`req.WithContext(ctx)`, or inject the returned transaction directly into the
+repository/session manager. Transaction tests must not commit or escape through
+another pool. Choose `CommittedDB` when real commits are part of the behavior.
+
+Parallelize packages first. Use `t.Parallel()` inside a package only with isolated
+transactions or disposable schemas, and no process-wide changes such as
+`t.Setenv` or `t.Chdir`. Do not truncate shared tables. Keep seeds and fixtures
+minimal; application seeders are not automatically run.
+
+Service tests use repository stubs and no infrastructure. Repository tests check
+SQL and constraints. HTTP feature tests mount only the required module routers,
+real services, and middleware; substitute external OAuth providers. Selected full
+router tests verify shared middleware and route composition.
+
+```sh
+make test-unit                    # -short: no real database setup
+make test                        # regular suite; unavailable DB skips locally
+make test-db                     # uncached suite; missing DB fails
+make test-ci                     # uncached suite + race detector; DB required
+make test-cover-gate              # core coverage must be at least 80%
+go test ./internal/users          # one feature's business rules
+go test ./internal/login/...      # complete feature
+```
+
+`CI=true` or `REQUIRE_TEST_DB=1` makes unavailable databases fail instead of skip.
+Use `make test-ci` in CI. `-short` explicitly opts out of DB-backed tests even in
+CI. For a required coverage run, use `REQUIRE_TEST_DB=1 make test-cover-gate`.
+Killed test processes can leave `go_test_*` schemas or databases behind; ordinary
+completion cleans them automatically. Tests that operate on hardcoded `public`
+objects must use `DisposableDatabase`, never the shared package schema.
 
 ## Notes
 
