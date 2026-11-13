@@ -37,7 +37,11 @@ type RunFunc func(ctx context.Context, a *app.App, out io.Writer) error
 
 // Command is one console command.
 type Command struct {
-	// Name is what the user types, e.g. "db:migrate".
+	// Name uses group:verb, e.g. "db:migrate". Feature commands use the
+	// feature name as their group. Examples for future commands:
+	//   ./app products:import --file=products.csv
+	//   ./app users:disable --id=123
+	// These illustrate naming; neither command is registered by this starter.
 	Name string
 	// Group places the command in the help listing.
 	Group string

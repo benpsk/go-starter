@@ -149,6 +149,18 @@ Other
   version                    Version and build information
 ```
 
+Name feature commands `<feature>:<verb>` and pass input through flags. Future
+commands could look like this:
+
+```sh
+# Naming examples only; these commands are not implemented by the starter.
+./app products:import --file=products.csv
+./app users:disable --id=123
+```
+
+Put their adapters in `internal/<feature>/console` and register them through the
+command registry. Keep business logic in the feature service.
+
 Dependencies are built lazily, so a command pays only for what it uses:
 
 | | config | pool | services | http |

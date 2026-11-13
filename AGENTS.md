@@ -262,6 +262,11 @@ twice must leave the database in the same state as running it once.
 - Commands take flags, not positional arguments, and write to the `io.Writer`
   they are handed so tests can capture output.
 - Name commands `group:verb`, and put them in the group that matches.
+- Feature commands use the feature name as their prefix. For example,
+  `./app products:import --file=products.csv` and
+  `./app users:disable --id=123`. These are naming examples, not commands
+  implemented by the starter. Feature command adapters belong in
+  `internal/<feature>/console`; register them through the command registry.
 - New scheduled work is a `cron:` command triggered externally. Do not add an
   in-process scheduler.
 
