@@ -167,18 +167,24 @@ func apply(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, files []string, 
 // run executes one file and records it in the same transaction, so a failure
 // leaves neither the change nor the record behind.
 func run(ctx context.Context, pool *pgxpool.Pool, kind Kind, name, statement string) error {
+	return runStep(ctx, pool, kind, name, func(ctx context.Context, q Querier) error {
+		if statement == "" {
+			return nil
+		}
+		_, err := q.Exec(ctx, statement)
+		return err
+	})
+}
+
+func runStep(ctx context.Context, pool *pgxpool.Pool, kind Kind, name string, fn func(context.Context, Querier) error) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin %s %s: %w", kind, name, err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck - safe to ignore rollback errors
 
-	// An empty file is still recorded, so adding content to it later does not
-	// silently re-run it.
-	if statement != "" {
-		if _, err := tx.Exec(ctx, statement); err != nil {
-			return fmt.Errorf("exec %s %s: %w", kind, name, err)
-		}
+	if err := fn(ctx, tx); err != nil {
+		return fmt.Errorf("exec %s %s: %w", kind, name, err)
 	}
 
 	// Re-applying updates the timestamp rather than failing, so the record
@@ -324,4 +330,24 @@ func listSQLFiles(entries []fs.DirEntry) []string {
 	}
 	sort.Strings(files)
 	return files
+}
+
+// Seed runs a Go seeder and records its name in the same transaction.
+// Call EnsureHistoryTable first. Already recorded seeders are skipped unless forced.
+func Seed(ctx context.Context, pool *pgxpool.Pool, name string, force bool, fn func(context.Context, Querier) error) (bool, error) {
+	if !force {
+		recorded, err := isRecorded(ctx, pool, KindSeeder, name)
+		if err != nil || recorded {
+			return false, err
+		}
+	}
+	if err := runStep(ctx, pool, KindSeeder, name, fn); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// SeederStatus reports history for the registered Go seeder names.
+func SeederStatus(ctx context.Context, pool *pgxpool.Pool, names []string) ([]HistoryEntry, error) {
+	return status(ctx, pool, names, KindSeeder)
 }

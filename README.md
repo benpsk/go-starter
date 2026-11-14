@@ -5,7 +5,7 @@ A minimal Go web + JSON API starter organized by business feature, with explicit
 ## Stack
 
 - Go + chi
-- pgx (PostgreSQL) with raw SQL migrations and seeders
+- pgx (PostgreSQL) with raw SQL migrations and Go seeders
 - templ + htmx + Tailwind CSS + DaisyUI + Chart.js
 - Social login for the browser (Google/GitHub) with database-backed cookie sessions
 - API auth with short-lived JWT access tokens and rotating refresh tokens
@@ -98,7 +98,7 @@ To add products:
 
 Shared infrastructure also includes configuration, application errors and HTTP
 error mapping, rate limiting, authenticated context, browser sessions, storage,
-and test helpers. SQL migrations and seeders remain centrally embedded in `db`;
+and test helpers. SQL migrations remain embedded in `db`; Go seeders live in `internal/seeder`;
 built frontend assets are served from `static`.
 
 ## Errors and responses
@@ -133,9 +133,9 @@ Serving
 
 Database
   db:migrate                 Apply pending migrations     --path --file --force
-  db:seed                    Apply pending seeders        --path --file --force --all
+  db:seed                    Apply pending Go seeders     --name --force --all
   db:status                  Applied and pending, both kinds
-  db:fresh                   Drop, recreate, migrate      --seed --path --seed-path
+  db:fresh                   Drop, recreate, migrate      --seed --path
   db:dump                    Dump via pg_dump             --out --format --clean
                                                           --schema-only --data-only
                                                           --exclude-table --exclude-table-data
@@ -206,14 +206,22 @@ because there is no schema to drop.
 ### Re-running a file
 
 Both kinds are tracked in one table, `schema_history (kind, name, applied_at)`,
-keyed on the pair so a seeder can share a filename with a migration without
+keyed on the pair so a seeder can share a name with a migration without
 being mistaken for it. Re-applying updates `applied_at`, so a row reads as *last*
 applied.
 
-Seeders are written to be idempotent, so re-running one is supported:
+`./app db:seed` runs the Go functions registered in `internal/seeder/seeder.go`,
+in registration order. Add seed functions there and register each with a stable
+name. Seeders are compiled into the binary; rebuild after changing them.
+Each function receives a context and transactional `postgres.Querier`, which can
+be passed to feature repositories. Its writes and history record commit together.
+The starter's `initial` seeder is empty and adds no application data.
+
+Use `./app db:seed --name=products` to run one pending seeder.
+Seeders must be idempotent; already applied names are skipped unless forced:
 
 ```
-app db:seed --force --file=000002_products.sql   # one seeder
+app db:seed --force --name=products   # one seeder
 app db:seed --force --all                        # every seeder, asked for explicitly
 ```
 

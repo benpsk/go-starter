@@ -15,6 +15,7 @@ import (
 
 	"github.com/benpsk/go-starter/internal/app"
 	"github.com/benpsk/go-starter/internal/postgres"
+	"github.com/benpsk/go-starter/internal/seeder"
 )
 
 // schemaChangeTimeout bounds a migration or seed run.
@@ -95,8 +96,7 @@ func seedCommand() Command {
 		Summary:  "Apply pending seeders",
 		NeedsApp: true,
 		Setup: func(fs *flag.FlagSet) RunFunc {
-			path := fs.String("path", defaultSeedersDir, "directory holding .sql seeders; falls back to the embedded copies")
-			only := fs.String("file", "", "apply only this file")
+			only := fs.String("name", "", "run only this Go seeder")
 			force := fs.Bool("force", false, "re-apply seeders that are already recorded")
 			all := fs.Bool("all", false, "with --force, re-apply every seeder")
 
@@ -106,15 +106,10 @@ func seedCommand() Command {
 				// explicitly, because it reads as harmless in a shell history
 				// and is not.
 				if *force && *only == "" && !*all {
-					return usagef("db:seed --force needs --file to name one seeder, or --all to re-apply every seeder")
+					return usagef("db:seed --force needs --name to name one seeder, or --all to re-apply every seeder")
 				}
 				if *all && !*force {
 					return usagef("db:seed --all only applies with --force")
-				}
-
-				source, err := seederSource(*path)
-				if err != nil {
-					return err
 				}
 
 				ctx, cancel := context.WithTimeout(ctx, schemaChangeTimeout)
@@ -128,11 +123,11 @@ func seedCommand() Command {
 					return err
 				}
 
-				applied, err := source.apply(ctx, pool, *only, *force)
+				applied, err := seeder.Apply(ctx, pool, *only, *force)
 				if errors.Is(err, postgres.ErrFileNotFound) {
 					return usagef("%s", err)
 				}
-				reportApplied(out, "seed", source.describe(), applied)
+				reportApplied(out, "seed", "Go", applied)
 				return err
 			}
 		},
@@ -147,14 +142,9 @@ func statusCommand() Command {
 		NeedsApp: true,
 		Setup: func(fs *flag.FlagSet) RunFunc {
 			path := fs.String("path", defaultMigrationsDir, "directory holding .sql migrations; falls back to the embedded copies")
-			seedPath := fs.String("seed-path", defaultSeedersDir, "directory holding .sql seeders; falls back to the embedded copies")
 
 			return func(ctx context.Context, a *app.App, out io.Writer) error {
 				migrations, err := migrationSource(*path)
-				if err != nil {
-					return err
-				}
-				seeders, err := seederSource(*seedPath)
 				if err != nil {
 					return err
 				}
@@ -167,15 +157,16 @@ func statusCommand() Command {
 					return err
 				}
 
-				// One table means both kinds can be reported together.
-				total := 0
-				for _, source := range []sqlSource{migrations, seeders} {
-					entries, err := source.status(ctx, pool)
-					if err != nil {
-						return err
-					}
-					total += printStatus(out, source, entries)
+				entries, err := migrations.status(ctx, pool)
+				if err != nil {
+					return err
 				}
+				total := printStatus(out, string(migrations.kind), migrations.describe(), entries)
+				entries, err = seeder.Status(ctx, pool)
+				if err != nil {
+					return err
+				}
+				total += printStatus(out, "seeder", "Go", entries)
 				fmt.Fprintf(out, "\n%d pending\n", total)
 				return nil
 			}
@@ -184,8 +175,8 @@ func statusCommand() Command {
 }
 
 // printStatus writes one section and returns how many files are pending.
-func printStatus(out io.Writer, source sqlSource, entries []postgres.HistoryEntry) int {
-	fmt.Fprintf(out, "\n%s (source: %s)\n", source.kind, source.describe())
+func printStatus(out io.Writer, kind, source string, entries []postgres.HistoryEntry) int {
+	fmt.Fprintf(out, "\n%s (source: %s)\n", kind, source)
 	if len(entries) == 0 {
 		fmt.Fprintln(out, "  none found")
 		return 0
@@ -193,7 +184,7 @@ func printStatus(out io.Writer, source sqlSource, entries []postgres.HistoryEntr
 
 	pending := 0
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "  STATE\tAPPLIED AT\tFILE\n")
+	fmt.Fprintf(tw, "  STATE\tAPPLIED AT\tNAME\n")
 	for _, entry := range entries {
 		switch {
 		case entry.Missing:
@@ -218,7 +209,6 @@ func freshCommand() Command {
 		Setup: func(fs *flag.FlagSet) RunFunc {
 			path := fs.String("path", defaultMigrationsDir, "directory holding .sql migrations; falls back to the embedded copies")
 			withSeed := fs.Bool("seed", false, "run seeders after migrating")
-			seedPath := fs.String("seed-path", defaultSeedersDir, "directory holding .sql seeders; falls back to the embedded copies")
 
 			return func(ctx context.Context, a *app.App, out io.Writer) error {
 				// This drops every table. Refusing outside development is the
@@ -229,17 +219,9 @@ func freshCommand() Command {
 					return usagef("db:fresh refuses to run with APP_ENV=%q; it is development only", env)
 				}
 
-				// Both sources resolve before anything is dropped, so a typo in
-				// --seed-path does not cost the schema.
 				migrations, err := migrationSource(*path)
 				if err != nil {
 					return err
-				}
-				var seeders sqlSource
-				if *withSeed {
-					if seeders, err = seederSource(*seedPath); err != nil {
-						return err
-					}
 				}
 
 				ctx, cancel := context.WithTimeout(ctx, schemaChangeTimeout)
@@ -266,8 +248,8 @@ func freshCommand() Command {
 				if !*withSeed {
 					return nil
 				}
-				seeded, err := seeders.apply(ctx, pool, "", false)
-				reportApplied(out, "seed", seeders.describe(), seeded)
+				seeded, err := seeder.Apply(ctx, pool, "", false)
+				reportApplied(out, "seed", "Go", seeded)
 				return err
 			}
 		},

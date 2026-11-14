@@ -101,7 +101,7 @@ serve: ## Run the HTTP server without the asset watchers
 migrate: ## Apply SQL migrations
 	@$(MAKE) --no-print-directory cmd ARGS="db:migrate"
 
-seed: ## Apply SQL seeders
+seed: ## Run Go seeders
 	@$(MAKE) --no-print-directory cmd ARGS="db:seed"
 
 status: ## Show applied and pending migrations

@@ -140,9 +140,9 @@ func TestFreshResetsAndReMigrates(t *testing.T) {
 func TestFreshValidatesPathsBeforeTouchingTheSchema(t *testing.T) {
 	r, appFunc, out := newLiveRegistry(t, "development")
 
-	// A bad --seed-path must be caught before the schema is dropped, or a typo
+	// A bad --path must be caught before the schema is dropped, or a typo
 	// destroys the database and then fails.
-	err := runFromRepoRoot(t, r, appFunc, "db:fresh", "--seed", "--seed-path=/definitely/not/here")
+	err := runFromRepoRoot(t, r, appFunc, "db:fresh", "--seed", "--path=/definitely/not/here")
 	if !IsUsageError(err) {
 		t.Fatalf("expected a usage error, got %v", err)
 	}
@@ -298,7 +298,7 @@ func TestSeedForceReApplies(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"one file", []string{"db:seed", "--force", "--file=000001_seed.sql"}},
+		{"one file", []string{"db:seed", "--force", "--name=initial"}},
 		{"every file", []string{"db:seed", "--force", "--all"}},
 	}
 	for _, tc := range cases {
@@ -312,7 +312,7 @@ func TestSeedForceReApplies(t *testing.T) {
 			if err := runFromRepoRoot(t, r, appFunc, tc.args...); err != nil {
 				t.Fatalf("%v failed: %v", tc.args, err)
 			}
-			if !strings.Contains(out.String(), "seed: applied 000001_seed.sql") {
+			if !strings.Contains(out.String(), "seed: applied initial") {
 				t.Fatalf("expected the seeder to be re-applied: %q", out.String())
 			}
 		})
@@ -322,7 +322,7 @@ func TestSeedForceReApplies(t *testing.T) {
 func TestFileFlagRejectsAnUnknownName(t *testing.T) {
 	cases := [][]string{
 		{"db:migrate", "--file=nope.sql"},
-		{"db:seed", "--file=nope.sql"},
+		{"db:seed", "--name=nope.sql"},
 	}
 	for _, args := range cases {
 		t.Run(args[0], func(t *testing.T) {

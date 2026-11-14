@@ -70,18 +70,6 @@ func TestResolveSourceRejectsAFile(t *testing.T) {
 	}
 }
 
-func TestSeederSourceUsesTheSeedersDirectory(t *testing.T) {
-	t.Chdir(t.TempDir())
-
-	source, err := seederSource(defaultSeedersDir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !source.embedded() {
-		t.Fatalf("expected the embedded seeders")
-	}
-}
-
 func TestEmbeddedSourcesCarryTheRepositoryFiles(t *testing.T) {
 	// Guards against an //go:embed path change silently emptying the bundle a
 	// deployed binary relies on.

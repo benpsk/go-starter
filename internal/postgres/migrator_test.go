@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -434,5 +435,65 @@ func TestEnsureHistoryTableAdoptsTheLegacyTables(t *testing.T) {
 		if present {
 			t.Fatalf("expected %s to be dropped after adoption", table)
 		}
+	}
+}
+
+func TestGoSeederTransactionAndRerun(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprint(fail), func(t *testing.T) {
+			pool := testutil.MigrationDB(t)
+			ctx := context.Background()
+			if _, err := pool.Exec(ctx, `create table seed_items (slug text primary key)`); err != nil {
+				t.Fatal(err)
+			}
+			failure := errors.New("seed failed")
+			calls := 0
+			fn := func(ctx context.Context, q postgres.Querier) error {
+				calls++
+				if _, err := q.Exec(ctx, `insert into seed_items (slug) values ('example') on conflict (slug) do nothing`); err != nil {
+					return err
+				}
+				if fail {
+					return failure
+				}
+				return nil
+			}
+			ran, err := postgres.Seed(ctx, pool, "items", false, fn)
+			if fail {
+				if ran || !errors.Is(err, failure) {
+					t.Fatalf("ran=%v err=%v", ran, err)
+				}
+			} else {
+				if !ran || err != nil {
+					t.Fatalf("ran=%v err=%v", ran, err)
+				}
+				if ran, err = postgres.Seed(ctx, pool, "items", false, fn); ran || err != nil {
+					t.Fatalf("second run: ran=%v err=%v", ran, err)
+				}
+				if calls != 1 {
+					t.Fatalf("calls=%d", calls)
+				}
+				if ran, err = postgres.Seed(ctx, pool, "items", true, fn); !ran || err != nil {
+					t.Fatalf("forced: ran=%v err=%v", ran, err)
+				}
+				if calls != 2 {
+					t.Fatalf("calls=%d", calls)
+				}
+			}
+			var count, history int
+			if err := pool.QueryRow(ctx, `select count(*) from seed_items`).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if err := pool.QueryRow(ctx, `select count(*) from schema_history where kind = 'seeder' and name = 'items'`).Scan(&history); err != nil {
+				t.Fatal(err)
+			}
+			want := 1
+			if fail {
+				want = 0
+			}
+			if count != want || history != want {
+				t.Fatalf("rows=%d history=%d want=%d", count, history, want)
+			}
+		})
 	}
 }

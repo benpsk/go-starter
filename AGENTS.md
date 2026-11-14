@@ -31,7 +31,8 @@ normal collection of Go packages within the single root `go.mod`.
 - `internal/apperror`, `internal/httperror`, `internal/ratelimit`,
   `internal/authctx`, `internal/storage`: shared infrastructure.
 - `internal/testutil`: test scaffolding (`.env.test`, schema setup, transactions).
-- `db/migrations`, `db/seeders`: raw SQL scripts embedded into the binary.
+- `db/migrations`: raw SQL migrations embedded into the binary.
+- `internal/seeder`: registered Go seed functions compiled into the binary.
 - `static`: built CSS/JS and vendored browser files.
 - `pkg`: utilities usable outside this application, such as pagination.
 
@@ -189,12 +190,13 @@ normal collection of Go packages within the single root `go.mod`.
 ## Database & Migrations
 
 - Connect to PostgreSQL via the pgx pool configured in `internal/postgres`.
-- Store raw SQL migrations in `db/migrations` and seeders in `db/seeders`; files
-  run lexicographically through `app db:migrate` and `app db:seed`. A deployed
-  binary has no checkout beside it, so the embedded copies are the fallback.
-- A file may contain multiple statements; group related changes together. Each
-  file runs in one transaction, so a failure leaves neither the change nor its
-  record behind.
+- Store raw SQL migrations in `db/migrations`; files run lexicographically
+  through `app db:migrate`, with embedded copies as the deployed fallback.
+- Register Go seed functions in `internal/seeder/seeder.go`. `app db:seed` runs
+  them in registration order. Each receives a context and transactional
+  `postgres.Querier`; use it for feature repositories and database writes.
+- Each migration or Go seeder runs in one transaction, so a failure leaves
+  neither its writes nor its history record behind. Rebuild after editing Go seeders.
 - One table tracks both: `schema_history (kind, name, applied_at)`, keyed on
   `(kind, name)`. Avoid external migration tooling.
   - The pair is the key, not `name` alone. A seeder sharing a filename with a
@@ -230,7 +232,7 @@ twice must leave the database in the same state as running it once.
   tables will eventually clear real data.
 - No DDL in a seeder. Schema belongs in a migration; this matters more precisely
   because seeders re-run.
-- Keep a seeder independent of the others. `db:seed --force --file=X` runs X
+- Keep a seeder independent of the others. `db:seed --force --name=X` runs X
   alone, so it cannot assume an earlier file ran in the same pass.
 
 ## Deployment & Security Notes

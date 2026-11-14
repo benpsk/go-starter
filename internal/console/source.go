@@ -15,7 +15,6 @@ import (
 
 const (
 	defaultMigrationsDir = "db/migrations"
-	defaultSeedersDir    = "db/seeders"
 )
 
 // sqlSource is where a command reads .sql files from: a directory on disk, or
@@ -56,11 +55,6 @@ func (s sqlSource) status(ctx context.Context, pool *pgxpool.Pool) ([]postgres.H
 // migrationSource resolves the migrations location for a --path value.
 func migrationSource(path string) (sqlSource, error) {
 	return resolveSource(postgres.KindMigration, path, defaultMigrationsDir, dbembed.Migrations, "migrations")
-}
-
-// seederSource resolves the seeders location for a --path value.
-func seederSource(path string) (sqlSource, error) {
-	return resolveSource(postgres.KindSeeder, path, defaultSeedersDir, dbembed.Seeders, "seeders")
 }
 
 // resolveSource prefers the directory when it exists. A missing default path
