@@ -59,34 +59,44 @@ func migrateCommand() Command {
 					}
 				}
 
-				source, err := migrationSource(*path)
-				if err != nil {
-					return err
-				}
-
-				ctx, cancel := context.WithTimeout(ctx, schemaChangeTimeout)
-				defer cancel()
-
-				pool, err := a.Pool(ctx)
-				if err != nil {
-					return err
-				}
-				if err := postgres.EnsureHistoryTable(ctx, pool); err != nil {
-					return err
-				}
-
-				applied, err := source.apply(ctx, pool, *only, *force)
-				if errors.Is(err, postgres.ErrFileNotFound) {
-					// Nothing was attempted, so reporting a run would mislead.
-					return usagef("%s", err)
-				}
-				// Report what landed even when a later file failed, so a
-				// partial run is not a mystery.
-				reportApplied(out, "migrate", source.describe(), applied)
-				return err
+				return runMigrations(ctx, a, out, *path, *only, *force)
 			}
 		},
 	}
+}
+
+// Migrate applies pending migrations using the default directory or embedded fallback.
+// Server startup calls this before building services or accepting requests.
+func Migrate(ctx context.Context, a *app.App, out io.Writer) error {
+	return runMigrations(ctx, a, out, defaultMigrationsDir, "", false)
+}
+
+func runMigrations(ctx context.Context, a *app.App, out io.Writer, path, only string, force bool) error {
+	source, err := migrationSource(path)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, schemaChangeTimeout)
+	defer cancel()
+
+	pool, err := a.Pool(ctx)
+	if err != nil {
+		return err
+	}
+	if err := postgres.EnsureHistoryTable(ctx, pool); err != nil {
+		return err
+	}
+
+	applied, err := source.apply(ctx, pool, only, force)
+	if errors.Is(err, postgres.ErrFileNotFound) {
+		// Nothing was attempted, so reporting a run would mislead.
+		return usagef("%s", err)
+	}
+	// Report what landed even when a later file failed, so a
+	// partial run is not a mystery.
+	reportApplied(out, "migrate", source.describe(), applied)
+	return err
 }
 
 func seedCommand() Command {

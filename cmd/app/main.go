@@ -102,6 +102,10 @@ func serveCommand() console.Command {
 					cfg.HTTPAddr = strings.TrimSpace(*addr)
 				}
 
+				if err := console.Migrate(ctx, a, out); err != nil {
+					return fmt.Errorf("startup migrations: %w", err)
+				}
+
 				services, err := a.Services(ctx)
 				if err != nil {
 					return err

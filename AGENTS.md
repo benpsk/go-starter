@@ -210,6 +210,9 @@ normal collection of Go packages within the single root `go.mod`.
 
 ### Migrations
 
+- Server startup applies pending migrations before constructing services and
+  accepting HTTP requests. A migration failure aborts startup. Seeders remain explicit.
+
 - Migrations are **not** expected to be idempotent, so re-running one is
   deliberately hard: `db:migrate --force` requires `--file` and refuses to run
   outside development.

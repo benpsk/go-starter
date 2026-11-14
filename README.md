@@ -18,8 +18,9 @@ A minimal Go web + JSON API starter organized by business feature, with explicit
    `GOOGLE_*` / `GITHUB_*`; for API auth set `API_ACCESS_TOKEN_SECRET`.
 2. Install frontend deps: `npm install`
 3. Build assets and generated templates: `make assets`
-4. Run migrations: `make migrate`
-5. Start the server: `make live` (or `go run ./cmd/app serve`)
+4. Start the server: `make live` (or `go run ./cmd/app serve`). Pending migrations
+   run automatically before the server accepts requests; a migration failure stops startup.
+   You can still run migrations separately with `make migrate`.
 
 `.env` is loaded automatically by both binaries, so `go run ./cmd/app` works
 without sourcing anything first.
